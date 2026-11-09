@@ -236,6 +236,10 @@ termwrap_backup.json
 *.lib
 build_out/
 
+# bin/ 下的预构建二进制是有意入库的（体积小、可直接使用）
+!bin/**/*.dll
+!bin/**/*.exe
+
 # PyInstaller 产物
 *.manifest
 
