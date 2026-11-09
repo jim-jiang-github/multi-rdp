@@ -218,3 +218,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ==== multi-rdp 项目专属 ====
+
+# 运行时生成的文件（含敏感信息，禁止提交）
+users.json
+client.log
+rdp_repair_backup.json
+termwrap_backup.json
+*.bmp
+
+# C/C++ 编译产物
+*.dll
+*.exe
+*.obj
+*.pdb
+*.lib
+build_out/
+
+# PyInstaller 产物
+*.manifest
+
+# IDE (MSVC)
+.vs/

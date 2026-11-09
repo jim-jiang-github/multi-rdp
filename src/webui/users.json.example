@@ -1,0 +1,7 @@
+{
+  "example": {
+    "name": "example",
+    "password": "REPLACE_WITH_RANDOM_PASSWORD",
+    "imported": false
+  }
+}
