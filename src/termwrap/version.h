@@ -1,0 +1,4 @@
+#define FILE_VERSION_STR "34029fcd"
+#define PRODUCT_VERSION_STR "v0.7"
+#define FILEVER 0,0,7,0
+#define PRODVER 0,0,7,0
