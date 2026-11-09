@@ -5,8 +5,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8123
 HERE = os.path.dirname(os.path.abspath(__file__))
-USERS_FILE = os.path.join(HERE, 'users.json')
-CONFIG_FILE = os.path.join(HERE, 'config.json')
+# PyInstaller 打包成单 exe 后，users.json / config.json / FreeRDP 等数据文件
+# 放在 exe 同目录下（可写），而不是解包临时目录里。
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    BASE_DIR = HERE
+USERS_FILE = os.path.join(BASE_DIR, 'users.json')
+CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
 RDP_GROUP = 'Remote Desktop Users'
 ADMIN_GROUP = 'Administrators'
 RESERVED = {'administrator', 'guest', 'defaultaccount', 'wdagutilityaccount',
@@ -253,7 +259,9 @@ def grant_admin(name):
 
 def _freerdp_exe():
     """定位客户端：优先 sdl3-freerdp（画面渲染正常），再 wfreerdp。"""
-    dirs = (os.path.join(HERE, 'FreeRDP'),
+    dirs = (os.path.join(BASE_DIR, 'FreeRDP'),
+            os.path.join(HERE, 'FreeRDP'),
+            os.path.join(HERE, '..', '..', 'bin', 'FreeRDP'),   # 仓库 bin/ 目录
             r'C:\Program Files\OpenStreamMS\FreeRDP')
     for name in ('sdl3-freerdp.exe', 'wfreerdp.exe'):
         for d in dirs:
@@ -286,7 +294,7 @@ def login_user(name):
                 '/w:1280', '/h:800', '/bpp:32', '/network:lan',
                 '/audio-mode:redirect', '/log-level:ERROR']
         try:
-            logf = open(os.path.join(HERE, 'client.log'), 'ab')
+            logf = open(os.path.join(BASE_DIR, 'client.log'), 'ab')
             proc = subprocess.Popen(
                 args, cwd=os.path.dirname(exe), stdout=logf, stderr=logf,
                 creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
@@ -530,7 +538,7 @@ def rdp_repair():
             inner = _MS_RDP_CORE_CLSID
         # 先备份，便于回滚
         try:
-            with open(os.path.join(HERE, 'rdp_repair_backup.json'), 'w', encoding='utf-8') as f:
+            with open(os.path.join(BASE_DIR, 'rdp_repair_backup.json'), 'w', encoding='utf-8') as f:
                 json.dump({'LoadableProtocol_Object': str(cur), 'restored': inner}, f, indent=2)
         except Exception:
             pass
@@ -652,7 +660,7 @@ async function checkEnv(){
 try{
 const s=await (await fetch('/api/status')).json();
 if(!s.admin){const b=document.getElementById('banner');b.style.display='block';
-b.textContent='⚠ 当前没有管理员权限，创建/删除会失败。请关掉本窗口，右键 start.bat 选「以管理员身份运行」。'}
+b.textContent='⚠ 当前没有管理员权限，创建/删除会失败。请以管理员身份重新运行本程序。'}
 const fix=document.getElementById('btnFix');
 if(s.rdp_hijacked){fix.style.display='inline-block'}else{fix.style.display='none'}
 document.getElementById('chkAdmin').checked = !!s.admin_default;
@@ -795,23 +803,32 @@ def _try_elevate():
     """没有管理员权限时自动弹 UAC 重启自己（成功则本进程退出）。"""
     try:
         import ctypes
-        rc = ctypes.windll.shell32.ShellExecuteW(
-            None, 'runas', sys.executable,
-            '"%s"' % os.path.abspath(__file__), HERE, 1)
+        if getattr(sys, 'frozen', False):
+            # 打包成 exe 后：直接以管理员重启 exe 本身
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, 'runas', sys.executable, None, BASE_DIR, 1)
+        else:
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, 'runas', sys.executable,
+                '"%s"' % os.path.abspath(__file__), HERE, 1)
         return rc > 32
     except Exception:
         return False
 
-if __name__ == '__main__':
+def start_server(port=PORT):
+    """创建 HTTP server 对象（不阻塞、不弹浏览器、不提权），供托盘程序后台运行。"""
+    return ThreadingHTTPServer(('127.0.0.1', port), Handler)
+
+def main():
     admin = _is_admin()
     if not admin:
         print('Not administrator - requesting elevation (UAC)...')
         if _try_elevate():
             sys.exit(0)
         print('!! Elevation was declined: create/delete will fail.')
-        print('   Close this window, right-click start.bat -> Run as administrator.')
+        print('   Close this window, right-click the launcher -> Run as administrator.')
     try:
-        server = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
+        server = start_server()
     except OSError as e:
         print(f'!! Cannot listen on port {PORT}: {e}')
         print('   Maybe another instance is already running. Close it and retry.')
@@ -824,3 +841,6 @@ if __name__ == '__main__':
         server.serve_forever()
     except KeyboardInterrupt:
         print('stopped.')
+
+if __name__ == '__main__':
+    main()
