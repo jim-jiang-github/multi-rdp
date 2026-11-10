@@ -248,3 +248,13 @@ build_out/
 
 # IDE (MSVC)
 .vs/
+*.user
+*.suo
+*.ilk
+*.exp
+*.tlog
+*.iobj
+*.ipdb
+Debug/
+Release/
+x64/
