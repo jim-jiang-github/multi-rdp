@@ -7,6 +7,16 @@ try {
     $key = 'HKLM:\SYSTEM\CurrentControlSet\Services\TermService\Parameters'
     $tw  = 'C:\Program Files\RDP Wrapper\TermWrap.dll'
 
+    # 仓库内自带预编译 TermWrap.dll（3rd/），目标位置缺失时先复制过去
+    if (-not (Test-Path $tw)) {
+        $repoDll = Join-Path (Split-Path $PSScriptRoot -Parent) '3rd\TermWrap.dll'
+        if (Test-Path $repoDll) {
+            New-Item -ItemType Directory -Force -Path (Split-Path $tw) | Out-Null
+            Copy-Item $repoDll $tw -Force
+            Say "copied TermWrap.dll from repo: $repoDll -> $tw"
+        }
+    }
+
     if (-not (Test-Path $tw)) { Say "ERROR: TermWrap.dll not found at $tw"; throw 'missing dll' }
 
     $cur = (Get-ItemProperty $key -Name ServiceDll -ErrorAction SilentlyContinue).ServiceDll

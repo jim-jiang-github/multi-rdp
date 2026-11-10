@@ -228,16 +228,12 @@ rdp_repair_backup.json
 termwrap_backup.json
 *.bmp
 
-# C/C++ 编译产物
+# 编译产物（TermWrap.dll 使用预编译版，本项目无需本地编译）
 *.dll
 *.exe
-*.obj
-*.pdb
-*.lib
-build_out/
 
-# bin/ 下的预构建二进制是有意入库的（体积小、可直接使用）
-!bin/**/*.dll
+# 预构建二进制是有意入库的（体积小、可直接使用）
+!3rd/TermWrap.dll
 !bin/**/*.exe
 
 # 本地工作区数据（AI 工作记录等）
@@ -246,15 +242,5 @@ build_out/
 # PyInstaller 产物
 *.manifest
 
-# IDE (MSVC)
+# IDE
 .vs/
-*.user
-*.suo
-*.ilk
-*.exp
-*.tlog
-*.iobj
-*.ipdb
-Debug/
-Release/
-x64/

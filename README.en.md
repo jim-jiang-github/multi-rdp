@@ -75,26 +75,20 @@ python src\webui\server.py
 multi-rdp/
 ├── src/
 │   ├── tray_app.py          # tray app entry point (pystray)
-│   ├── webui/
-│   │   ├── server.py        # web UI + user management core (127.0.0.1:8123)
-│   │   ├── screencap.py     # pure-ctypes GDI screenshot helper
-│   │   ├── config.json      # UI config (admin_default / lang)
-│   │   └── users.json.example  # user DB template (real users.json is ignored)
-│   └── termwrap/            # multi-session patch C++ sources (TermWrap 0.7)
-│       └── ptest/           # offline self-test + live patcher sources
+│   └── webui/
+│       ├── server.py        # web UI + user management core (127.0.0.1:8123)
+│       ├── screencap.py     # pure-ctypes GDI screenshot helper
+│       ├── config.json      # UI config (admin_default / lang)
+│       └── users.json.example  # user DB template (real users.json is ignored)
 ├── 3rd/
-│   └── zydis/               # submodule: disassembler used to build TermWrap
-├── bin/                     # prebuilt artifacts (usable as-is, no build needed)
+│   └── TermWrap.dll         # multi-session patch (prebuilt 423 KB, ready to use)
+├── bin/                     # prebuilt tools (usable as-is, no build needed)
 │   ├── FreeRDP/             # sdl3-freerdp.exe / wfreerdp.exe + license
-│   ├── TermWrap.dll         # multi-session patch (423 KB)
 │   ├── patchtest.exe        # offline patch self-test (27 signature checks)
 │   └── patchlive.exe        # live patcher (patches TermService without reboot)
 ├── scripts/
 │   ├── run.bat              # double-click run/debug
 │   ├── build.bat            # package single exe
-│   ├── build_termwrap.sh    # build TermWrap.dll from source (MSVC 2022)
-│   ├── build_patchtest.sh   # build patchtest.exe
-│   ├── build_patchlive.sh   # build patchlive.exe
 │   ├── fix_termwrap.bat     # persist ServiceDll (effective after reboot)
 │   ├── rollback_termwrap.bat# restore the original ServiceDll
 │   ├── check_termwrap.ps1   # check TermWrap load state / concurrent sessions flag
@@ -108,9 +102,7 @@ multi-rdp/
 Windows client editions allow only one remote session. `TermWrap.dll` runtime-patches
 `termsrv.dll` to lift that limit, enabling **several users online at the same time**.
 
-- Prebuilt: `bin/TermWrap.dll` — ready to use, **no local build required**
-- Sources: `src/termwrap/` (depends on zydis, included as the `3rd/zydis` submodule)
-- Rebuild: `scripts/build_termwrap.sh` (VS 2022 + Win10 SDK; paths at the top of the script)
+- Prebuilt dll: `3rd/TermWrap.dll` — ready to use, **no local build required** (sources are not distributed with this repo)
 
 Two ways to enable it:
 
@@ -144,7 +136,7 @@ here; build it yourself from <https://github.com/FreeRDP/FreeRDP> if needed. Lic
 ## Tech stack
 
 Python 3 (stdlib `http.server` + `ctypes`/`winreg`), pystray + Pillow (tray), PyInstaller
-(packaging), FreeRDP (RDP client), C++ / MSVC (TermWrap), zydis (disassembler).
+(packaging), FreeRDP (RDP client); the TermWrap multi-session patch ships as a prebuilt dll.
 
 ## License
 

@@ -67,26 +67,20 @@ python src\webui\server.py
 multi-rdp/
 ├── src/
 │   ├── tray_app.py          # 托盘程序入口（pystray）
-│   ├── webui/
-│   │   ├── server.py        # Web UI + 用户管理核心（127.0.0.1:8123）
-│   │   ├── screencap.py     # 纯 ctypes GDI 截屏小工具
-│   │   ├── config.json      # 界面配置（admin_default / lang）
-│   │   └── users.json.example  # 用户库模板（真实 users.json 不入库）
-│   └── termwrap/            # 多会话补丁 C++ 源码（TermWrap 0.7）
-│       └── ptest/           # 离线自检 + 活体补丁器源码
+│   └── webui/
+│       ├── server.py        # Web UI + 用户管理核心（127.0.0.1:8123）
+│       ├── screencap.py     # 纯 ctypes GDI 截屏小工具
+│       ├── config.json      # 界面配置（admin_default / lang）
+│       └── users.json.example  # 用户库模板（真实 users.json 不入库）
 ├── 3rd/
-│   └── zydis/               # 子模块：反汇编库（编译 TermWrap 用）
-├── bin/                     # 预编译产物（直接可用，无需本地编译）
+│   └── TermWrap.dll         # 多会话补丁（预编译 423 KB，直接可用）
+├── bin/                     # 预编译工具（直接可用，无需本地编译）
 │   ├── FreeRDP/             # sdl3-freerdp.exe / wfreerdp.exe + 许可证
-│   ├── TermWrap.dll         # 多会话补丁（423 KB）
 │   ├── patchtest.exe        # 离线补丁自检（27 特征码验证）
 │   └── patchlive.exe        # 活体补丁器（不重启给 TermService 打补丁）
 ├── scripts/
 │   ├── run.bat              # 双击运行/调试
 │   ├── build.bat            # 打包单 exe
-│   ├── build_termwrap.sh    # 从源码编译 TermWrap.dll（MSVC 2022）
-│   ├── build_patchtest.sh   # 编译 patchtest.exe
-│   ├── build_patchlive.sh   # 编译 patchlive.exe
 │   ├── fix_termwrap.bat     # 设置 ServiceDll 持久化（重启后自动生效）
 │   ├── rollback_termwrap.bat# 回滚 ServiceDll 到原值
 │   ├── check_termwrap.ps1   # 检查 TermWrap 加载状态与并发会话开关
@@ -100,9 +94,7 @@ multi-rdp/
 Windows 客户端版默认只允许一个远程会话。`TermWrap.dll` 通过运行时给 `termsrv.dll`
 打补丁绕过该限制，实现**多个用户同时在线**的多会话远程桌面。
 
-- 预编译产物：`bin/TermWrap.dll`，直接可用，**无需本地编译**
-- 源码：`src/termwrap/`（依赖 zydis，已作为子模块放在 `3rd/zydis`）
-- 重新编译：`scripts/build_termwrap.sh`（需要 VS 2022 + Win10 SDK，路径在脚本头部可调）
+- 预编译 dll：`3rd/TermWrap.dll`，直接可用，**无需本地编译**（源码不随本仓库分发）
 
 使用方式（二选一）：
 
@@ -133,7 +125,7 @@ Windows 客户端版默认只允许一个远程会话。`TermWrap.dll` 通过运
 ## 技术栈
 
 Python 3（标准库 `http.server` + `ctypes`/`winreg`）、pystray + Pillow（托盘）、
-PyInstaller（打包）、FreeRDP（RDP 客户端）、C++ / MSVC（TermWrap 补丁）、zydis（反汇编）。
+PyInstaller（打包）、FreeRDP（RDP 客户端）；TermWrap 多会话补丁直接使用预编译 dll。
 
 ## License
 
