@@ -57,11 +57,11 @@ Self-elevates via UAC, starts the web UI in console mode and opens
 scripts\build.bat
 ```
 
-Produces `dist\MultiRDP.exe` (PyInstaller, one file, no console window). First run:
+Produces `dist\MultiRDP.exe` (PyInstaller, one file, no console window). The script also copies
+the FreeRDP client from `3rd\FreeRDP\` to `dist\FreeRDP\` for you. First run:
 
-1. Copy the whole `bin\FreeRDP\` folder to `dist\FreeRDP\`
-2. Double-click `dist\MultiRDP.exe` (it requests administrator rights) — it stays in the tray
-3. Right-click the tray icon → Open Web UI
+1. Double-click `dist\MultiRDP.exe` (it requests administrator rights) — it stays in the tray
+2. Right-click the tray icon → Open Web UI
 
 ### Option 3 — plain Python
 

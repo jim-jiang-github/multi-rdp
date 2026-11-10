@@ -49,11 +49,11 @@ scripts\run.bat
 scripts\build.bat
 ```
 
-产物为 `dist\MultiRDP.exe`（PyInstaller，单文件、无控制台窗口）。首次使用：
+产物为 `dist\MultiRDP.exe`（PyInstaller，单文件、无控制台窗口）。脚本会顺带把 FreeRDP
+客户端从 `3rd\FreeRDP\` 复制到 `dist\FreeRDP\`，无需手动操作。首次使用：
 
-1. 把仓库 `bin\FreeRDP\` 整个目录复制到 `dist\FreeRDP\`
-2. 双击 `dist\MultiRDP.exe`（自动请求管理员权限），程序驻留托盘
-3. 托盘右键 → 打开 Web UI
+1. 双击 `dist\MultiRDP.exe`（自动请求管理员权限），程序驻留托盘
+2. 托盘右键 → 打开 Web UI
 
 ### 方式三：直接跑 Python
 
