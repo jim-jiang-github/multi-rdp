@@ -152,8 +152,10 @@ We tried defaulting the client to the **SDL software renderer**
 (`SDL_RENDER_DRIVER=software`, the final blit runs on the CPU), which decouples it from the GPU
 entirely and eliminates the "Not Responding" state - but in practice it makes the client drop
 frames constantly, the larger the resolution the worse, which feels worse day-to-day than an
-occasional hang. So **GPU rendering stays the default** and the watchdog below covers the hang
-case. If your client hangs and restarts over and over, set `"software_render": true` in
+occasional hang. So **GPU rendering stays the default**; a hung window usually crashes on its
+own within a minute or so and the manager reconnects it with the previous visibility (see
+below), so the session survives. If your client hangs and restarts over and over, set
+`"software_render": true` in
 `config.json` to switch to software rendering. The other measured factor is **resolution**: the
 session desktop follows the client's /w /h, so a larger window multiplies both the in-session
 rendering and the RDP capture/encode cost (1920x1080 is twice the pixels of 1280x800) - prefer a
@@ -163,13 +165,11 @@ of the game session hung repeatedly - exactly this mechanism.
 
 What the manager does about it:
 
-- two consecutive unanswered pings (~8 s apart) mark the window as stuck; the client is ended and
-  reconnected with the same visibility (the session itself is untouched, you land back on the same
-  desktop). At most two restarts per user within two minutes, so a false positive cannot loop
-- when the client process exits on its own, the reconnect **preserves visibility**: a visible
+- when the client process exits (crashes on its own or the window is closed with X), the
+  reconnect **preserves visibility**: a visible
   window comes back visible and activated, a hidden one stays hidden; repeated crashes within five
   minutes back off automatically
-- every action is logged to `client.log` ("无响应 / client exited / keep-alive")
+- every action is logged to `client.log` ("client exited / keep-alive")
 
 To reduce the root cause, pass extra client arguments from `config.json` (no rebuild needed):
 

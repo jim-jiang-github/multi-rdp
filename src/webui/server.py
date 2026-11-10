@@ -466,13 +466,6 @@ _kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
 _kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
 _kernel32.WaitForSingleObject.restype = ctypes.c_ulong
 _user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
-# 探活：往窗口发一个 WM_NULL，带 SMTO_ABORTIFHUNG —— 目标线程卡住（也就是系统
-# 显示「未响应」的那个状态）时立刻返回 0，不用真的等超时。
-SMTO_BLOCK, SMTO_ABORTIFHUNG, WM_NULL = 0x0001, 0x0002, 0x0000
-_user32.SendMessageTimeoutW.argtypes = [
-    ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_size_t,
-    ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(ctypes.c_size_t)]
-_user32.SendMessageTimeoutW.restype = ctypes.c_void_p
 
 
 def _keep_alive():
@@ -504,17 +497,6 @@ def _exe_of(pid):
             _exe_cache.pop(k, None)
     _exe_cache[pid] = (name, now)
     return name
-
-
-def _responds(hwnd, timeout=1200):
-    """窗口的 UI 线程还在处理消息吗（系统显示「未响应」时为 False）。"""
-    if not hwnd:
-        return True
-    res = ctypes.c_size_t(0)
-    r = _user32.SendMessageTimeoutW(hwnd, WM_NULL, 0, 0,
-                                    SMTO_BLOCK | SMTO_ABORTIFHUNG, timeout,
-                                    ctypes.byref(res))
-    return bool(r)
 
 
 def _log(msg):
@@ -634,7 +616,6 @@ def _ensure_adopted():
     if not _adopted:
         _adopted = True
         _adopt_clients()
-        _ensure_hung_watch()
 
 
 def _top_windows(pid=None):
@@ -813,8 +794,8 @@ def _spawn_client(info, hidden=False):
     # GPU：会话里跑游戏把 GPU 占满时，客户端的 present 会排队，主线程被卡住，
     # 表现为窗口「未响应」（实测 CPU 空闲、8 个线程停在 EventPairLow）。
     # 但实测软件渲染（blit 放到 CPU）会让客户端持续掉帧变卡——分辨率越大越明显，
-    # 日常体验比偶尔卡死更糟。所以默认走 GPU 渲染，卡死交给 _watch_hung 看门狗
-    # （8 秒内检测到无响应就重启客户端、会话不丢）兜底；
+    # 日常体验比偶尔卡死更糟，所以默认仍走 GPU 渲染；卡住的窗口一般几十秒后自己
+    # 崩掉，由 _watch_client 保活线程按原可见性重连，会话不丢。
     # 实在反复卡死就在 config.json 里写 "software_render": true 换回软件渲染。
     env = os.environ.copy()
     if _load_cfg().get('software_render', False):
@@ -851,7 +832,6 @@ def _connect(info, hidden=False, auto=False, reveal=False):
     _clients[key] = {'proc': proc, 'pid': proc.pid, 'hwnd': 0, 'hidden': bool(hidden),
                      'intent': '', 'auto': auto, 't0': time.time()}
     _save_clients()
-    _ensure_hung_watch()
     if hidden:
         threading.Thread(target=_hide_when_ready, args=(key, proc), daemon=True).start()
     elif reveal:
@@ -950,86 +930,6 @@ def _watch_client(key, proc, info, was_hidden=True):
 
 
 _crashes = {}          # key -> [退出时间...]，用来算重连退避
-
-
-_hung_state = {}       # key -> 连续判定无响应的次数
-_hung_restarts = {}    # key -> [重启时间...]，防误判造成反复重启
-_hung_pause_log = {}   # key -> 上次「暂停自动重启」日志时间（限频，别刷屏）
-_hung_started = False
-_hung_lock = threading.Lock()
-
-
-def _ensure_hung_watch():
-    """全局只起一个「未响应」看门狗。"""
-    global _hung_started
-    with _hung_lock:
-        if _hung_started:
-            return
-        _hung_started = True
-    threading.Thread(target=_watch_hung, daemon=True).start()
-
-
-def _watch_hung():
-    """盯着客户端窗口有没有卡死（系统标题栏出现「未响应」就是这个状态）。
-
-    FreeRDP 卡住的时候进程还活着，所以保活逻辑（等进程退出）救不回来：窗口会一直
-    白着、显示「未响应」，几十秒后才可能自己崩掉。这里连续两次（约 8s）确认窗口
-    不回消息，就主动重启客户端——会话本身不动，重连后回到原来的桌面。
-    """
-    while True:
-        time.sleep(4)
-        try:
-            for key, ent in list(_clients.items()):
-                if not _alive(ent):
-                    continue
-                if time.time() - float(ent.get('t0') or 0) < 8:
-                    continue                       # 刚拉起，还在握手
-                hwnd, _pid = _client_window(key, key)
-                if not hwnd:
-                    continue
-                if _responds(hwnd):
-                    _hung_state.pop(key, None)
-                    _hung_pause_log.pop(key, None)
-                    continue
-                _hung_state[key] = _hung_state.get(key, 0) + 1
-                if _hung_state[key] < 2:
-                    continue
-                _hung_state.pop(key, None)
-                now = time.time()
-                recent = [t for t in _hung_restarts.get(key, []) if now - t < 120]
-                if len(recent) >= 2:
-                    # 2 分钟内已重启过两次还卡：再重启没意义，先停手。
-                    # 只记一条日志，别每 4 秒刷一行把 client.log 灌满。
-                    if now - _hung_pause_log.get(key, 0) > 120:
-                        _hung_pause_log[key] = now
-                        _log('%s 反复无响应但重启无效（疑似会话内负载过重），暂停自动重启'
-                             % key)
-                    _hung_restarts[key] = recent
-                    continue
-                _hung_restarts[key] = recent + [now]
-                threading.Thread(target=_restart_hung, args=(key, dict(ent)),
-                                 daemon=True).start()
-        except Exception:
-            pass
-
-
-def _restart_hung(key, ent):
-    """客户端窗口卡死：结束进程再按原来的可见性重连。"""
-    info = _load().get(key)
-    if not info or not info.get('password'):
-        return
-    hidden = bool(ent.get('hidden'))
-    _log('窗口无响应，重启客户端 %s（窗口原本%s）' % (info['name'], '隐藏' if hidden else '可见'))
-    if _clients.get(key) and _pid_of(_clients[key]) == _pid_of(ent):
-        _clients.pop(key, None)
-        _save_clients()
-    pid = _pid_of(ent)
-    if pid and _pid_running(pid):
-        _run(['taskkill', '/PID', str(pid), '/T', '/F'])
-    time.sleep(1.5)
-    ok, err = _connect(info, hidden=hidden, auto=True, reveal=not hidden)
-    if not ok:
-        _log('重启失败 %s: %s' % (info['name'], err))
 
 
 def login_user(name):
