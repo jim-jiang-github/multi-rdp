@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """简易用户管理 Web UI：注册 / 登录(RDP) / 删除。仅监听 127.0.0.1。"""
-import ctypes, json, os, random, re, shutil, string, subprocess, sys, threading, time, webbrowser
+import atexit, ctypes, json, os, random, re, shutil, string, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8123
@@ -407,7 +407,227 @@ def _freerdp_exe():
                 return p
     return None
 
-_clients = {}   # username.lower() -> Popen（已打开的远程窗口）
+# ------------------------------------------------------------------ 客户端窗口
+# 会话是 Active 还是 Disc，只取决于「还有没有 RDP 客户端连着」：
+#   · 客户端进程退出（点了窗口的 X）→ 连接断掉 → 会话立刻变 Disc
+#   · Disc 状态没有输入通道，DWM 也不再给这个会话出画面：里面的窗口虽然还记着
+#     自己的前台窗口，但拿不到真正的焦点，截图/键鼠注入都会失真
+# 所以「窗口关掉了、后台还得是激活的」只有一个做法：进程别退出，只把窗口藏起来
+# （ShowWindow(SW_HIDE)，任务栏和 Alt+Tab 里都看不到）。连接还在 → 会话始终 Active。
+_clients = {}   # username.lower() -> {'proc','hwnd','hidden','intent','auto','t0'}
+
+SW_HIDE, SW_SHOW, SW_RESTORE, SW_MINIMIZE = 0, 1, 9, 6
+GW_OWNER = 4
+_CLIENT_EXES = ('sdl3-freerdp.exe', 'wfreerdp.exe', 'mstsc.exe')
+
+_user32 = ctypes.WinDLL('user32', use_last_error=True)
+_kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+_user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+_user32.GetWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+_user32.GetWindow.restype = ctypes.c_void_p
+_user32.GetWindowTextLengthW.argtypes = [ctypes.c_void_p]
+_user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+_user32.IsWindowVisible.argtypes = [ctypes.c_void_p]
+_user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+_kernel32.OpenProcess.restype = ctypes.c_void_p
+_kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+_kernel32.QueryFullProcessImageNameW.argtypes = [
+    ctypes.c_void_p, ctypes.c_ulong, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_ulong)]
+_kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+
+def _keep_alive():
+    """用户直接点窗口 X 之后，是否在后台自动重连一次（保住 Active），默认开。"""
+    return bool(_load_cfg().get('keep_alive', True))
+
+
+def _exe_of(pid):
+    """进程 exe 名（小写），失败返回空串。"""
+    h = _kernel32.OpenProcess(0x1000, 0, pid)    # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ''
+    try:
+        n = ctypes.c_ulong(1024)
+        buf = ctypes.create_unicode_buffer(1024)
+        if _kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+            return os.path.basename(buf.value).lower()
+        return ''
+    finally:
+        _kernel32.CloseHandle(h)
+
+
+def _top_windows(pid=None):
+    """[(hwnd, pid, title)]，含隐藏窗口；带 owner 的弹层/对话框跳过。"""
+    out = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+    def _cb(hwnd, _lp):
+        p = ctypes.c_ulong()
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+        if pid and p.value != pid:
+            return 1
+        if _user32.GetWindow(hwnd, GW_OWNER):
+            return 1
+        n = _user32.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(n + 1)
+        _user32.GetWindowTextW(hwnd, buf, n + 1)
+        out.append((hwnd, p.value, buf.value))
+        return 1
+
+    _user32.EnumWindows(_cb, None)
+    return out
+
+
+def _client_window(name, key=None):
+    """定位某个用户的远程窗口，返回 (hwnd, pid)；找不到返回 (0, 0)。
+
+    优先用内存里记的 pid；程序重启后内存是空的，就退回按窗口标题认人
+    （标题里带用户名），只有唯一命中时才认，避免藏错窗口。
+    """
+    key = (key or name).lower()
+    ent = _clients.get(key)
+    if ent and ent['proc'].poll() is None:
+        if ent.get('hwnd'):
+            return ent['hwnd'], ent['proc'].pid
+        wins = _top_windows(ent['proc'].pid)
+        # SDL/FreeRDP 会顺手建几个不可见的辅助窗口，优先挑屏幕上真看得见的那个
+        wins.sort(key=lambda w: 0 if _user32.IsWindowVisible(w[0]) else 1)
+        if wins:
+            return wins[0][0], ent['proc'].pid
+        return 0, ent['proc'].pid
+    low = name.lower()
+    hit = [(h, p) for h, p, title in _top_windows()
+           if low in title.lower() and _exe_of(p) in _CLIENT_EXES]
+    if len(hit) == 1:
+        return hit[0]
+    if not hit:
+        # 标题里认不出人：整机只有唯一一个远程客户端窗口时，就认它
+        allc = [(h, p) for h, p, _t in _top_windows() if _exe_of(p) in _CLIENT_EXES]
+        if len(allc) == 1:
+            return allc[0]
+    return 0, 0
+
+
+def _set_visible(hwnd, visible):
+    """显示 / 隐藏窗口；隐藏失败就退回最小化（最小化同样保持连接、会话仍 Active）。"""
+    if visible:
+        _user32.ShowWindow(hwnd, SW_RESTORE)
+        _user32.ShowWindow(hwnd, SW_SHOW)
+        _user32.SetForegroundWindow(hwnd)
+        return True
+    _user32.ShowWindow(hwnd, SW_HIDE)
+    if _user32.IsWindowVisible(hwnd):
+        _user32.ShowWindow(hwnd, SW_MINIMIZE)
+    return not _user32.IsWindowVisible(hwnd)
+
+
+def _hide_when_ready(key, proc):
+    """后台重连的窗口一露头就藏起来（SDL 不一定理 STARTUPINFO 的 SW_HIDE）。"""
+    for _ in range(40):                      # 最多等 10s
+        if proc.poll() is not None:
+            return
+        if _client_window(key, key)[0]:
+            _clients.get(key, {})['hidden'] = True
+            hide_client(key)
+            return
+        time.sleep(0.25)
+
+
+def _spawn_client(info, hidden=False):
+    """拉起 FreeRDP 客户端，返回 Popen（失败返回 None）。"""
+    pwd = info['password']
+    exe = _freerdp_exe()
+    if not exe:
+        return None
+    # mstsc 连本机回环会立刻断开会话（reason code 17）；旧的 wfreerdp 画面全黑，
+    # 只有 sdl3-freerdp 能正常渲染，所以按优先级选客户端。
+    w, h = _rdp_geometry()
+    args = [exe, '/v:127.0.0.1', '/u:' + info['name'],
+            '/d:' + os.environ.get('COMPUTERNAME', '.'),
+            '/p:' + pwd, '/cert:ignore',
+            '/bpp:32', '/network:lan',
+            '/audio-mode:redirect', '/log-level:ERROR']
+    if w and h:
+        args += ['/w:%d' % w, '/h:%d' % h]
+    else:
+        args += ['/f']            # 全屏模式
+    si = None
+    if hidden:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = SW_HIDE
+    logf = open(os.path.join(BASE_DIR, 'client.log'), 'ab')
+    return subprocess.Popen(
+        args, cwd=os.path.dirname(exe), stdout=logf, stderr=logf,
+        startupinfo=si,
+        creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
+
+
+def _connect(info, hidden=False, auto=False):
+    """连上（或重连）该用户的桌面。hidden=True 时窗口不显示，但连接建立、会话 Active。"""
+    key = info['name'].lower()
+    try:
+        proc = _spawn_client(info, hidden=hidden)
+    except Exception as e:
+        return False, _t('启动远程窗口失败: ', 'Failed to launch remote window: ') + str(e)
+    if proc is None:
+        return False, _t('找不到 FreeRDP 客户端（3rd/FreeRDP 缺失）',
+                         'FreeRDP client not found (3rd/FreeRDP missing)')
+    time.sleep(3.0)
+    if proc.poll() is not None:
+        return False, _t('远程窗口启动后立即退出，详见 client.log',
+                         'Remote window exited immediately after launch, see client.log')
+    _clients[key] = {'proc': proc, 'hwnd': 0, 'hidden': bool(hidden),
+                     'intent': '', 'auto': auto, 't0': time.time()}
+    if hidden:
+        threading.Thread(target=_hide_when_ready, args=(key, proc), daemon=True).start()
+    threading.Thread(target=_watch_client, args=(key, proc, info), daemon=True).start()
+    return True, None
+
+
+def _kill_client(key):
+    """主动关掉客户端进程，并打标记，避免保活线程又把它拉起来。"""
+    ent = _clients.pop(key, None)
+    if ent and ent['proc'].poll() is None:
+        ent['intent'] = 'app'
+        try:
+            ent['proc'].terminate()
+            ent['proc'].wait(timeout=5)
+        except Exception:
+            pass
+
+
+def _watch_client(key, proc, info):
+    """盯着客户端进程：用户点 X 关窗 = 连接断掉 → 会话变 Disc。
+
+    想「关掉窗口后台还激活」，就在这种情况下悄悄在后台重连一次（窗口隐藏），
+    会话回到 Active，而用户桌面上什么都不会弹出来。
+    """
+    proc.wait()
+    with _lock:
+        ent = _clients.get(key)
+        if not ent or ent['proc'] is not proc:
+            return
+        intent, auto, t0 = ent.get('intent'), ent.get('auto'), ent.get('t0', 0)
+        _clients.pop(key, None)
+    if intent or auto and time.time() - t0 < 15:
+        return                     # 我们自己关的；或者后台重连也秒退，不再循环
+    if not _keep_alive():
+        return
+    time.sleep(2.0)                # 等系统把会话状态刷成 Disc
+    sess = _sessions().get(info['name'].lower())
+    if not sess or sess['state'] != 'disc':
+        return                     # 会话没了（被注销）或仍在线，不需要保活
+    ok, err = _connect(info, hidden=True, auto=True)
+    try:
+        with open(os.path.join(BASE_DIR, 'client.log'), 'a', encoding='utf-8') as f:
+            f.write('[%s] keep-alive %s: %s\n' % (
+                time.strftime('%Y-%m-%d %H:%M:%S'), info['name'],
+                'reconnected hidden' if ok else 'failed: %s' % err))
+    except OSError:
+        pass
+
 
 def login_user(name):
     db = _sync_users()
@@ -415,43 +635,24 @@ def login_user(name):
     info = db.get(key)
     if not info:
         return False, _t('用户不存在', 'User not found')
-    prev = _clients.get(key)
-    if prev is not None and prev.poll() is None:
-        return True, None          # 窗口已经开着，不重复弹
+    ent = _clients.get(key)
+    if ent and ent['proc'].poll() is None:
+        if ent.get('hidden'):
+            ok, err = show_client(name)     # 之前收进后台了，直接把窗口请回来
+            return (True, None) if ok else (False, err)
+        return True, None                   # 窗口已经开着，不重复弹
     if not info.get('password'):
         return False, _t('该用户没有保存密码，无法一键登录（可删除后重新注册）',
                          'This user has no saved password, one-click login is unavailable (delete and re-create it)')
-    pwd = info['password']
-    exe = _freerdp_exe()
-    if exe:
-        # mstsc 连本机回环会立刻断开会话（reason code 17）；旧的 wfreerdp 画面全黑，
-        # 只有 sdl3-freerdp 能正常渲染，所以按优先级选客户端。
-        w, h = _rdp_geometry()
-        args = [exe, '/v:127.0.0.1', '/u:' + info['name'],
-                '/d:' + os.environ.get('COMPUTERNAME', '.'),
-                '/p:' + pwd, '/cert:ignore',
-                '/bpp:32', '/network:lan',
-                '/audio-mode:redirect', '/log-level:ERROR']
-        if w and h:
-            args += ['/w:%d' % w, '/h:%d' % h]
-        else:
-            args += ['/f']        # 全屏模式
-        try:
-            logf = open(os.path.join(BASE_DIR, 'client.log'), 'ab')
-            proc = subprocess.Popen(
-                args, cwd=os.path.dirname(exe), stdout=logf, stderr=logf,
-                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
-        except Exception as e:
-            return False, _t('启动远程窗口失败: ', 'Failed to launch remote window: ') + str(e)
-        time.sleep(3.0)
-        if proc.poll() is not None:
-            return False, _t('远程窗口启动后立即退出，详见 client.log',
-                             'Remote window exited immediately after launch, see client.log')
-        _clients[key] = proc
-        return True, None
-    # 兜底：没有 wfreerdp 就用 mstsc
+    if not _freerdp_exe():
+        return _mstsc_connect(info)
+    return _connect(info)
+
+
+def _mstsc_connect(info):
+    """兜底：没有 FreeRDP 就用 mstsc。"""
     _run(['cmdkey', '/generic:TERMSRV/127.0.0.2', '/user:' + info['name'],
-          '/pass:' + pwd])
+          '/pass:' + info['password']])
     w, h = _rdp_geometry()
     geom = ['/w:%d' % w, '/h:%d' % h] if (w and h) else ['/f']
     try:
@@ -461,6 +662,49 @@ def login_user(name):
         return False, _t('启动远程窗口失败: ', 'Failed to launch remote window: ') + str(e)
     return True, None
 
+
+def hide_client(name):
+    """把远程窗口收进后台：窗口隐藏、连接不断、会话保持 Active。"""
+    if not _is_admin():
+        return False, _t(ADMIN_ZH, ADMIN_EN)
+    hwnd, _pid = _client_window(name)
+    if not hwnd:
+        return False, _t('没有找到该用户的远程窗口', 'No remote window found for this user')
+    _set_visible(hwnd, False)
+    ent = _clients.get(name.lower())
+    if ent:
+        ent['hidden'] = True
+        ent['hwnd'] = hwnd
+    return True, None
+
+
+def show_client(name):
+    """把收进后台的窗口请回来（会话一直在线，桌面原样恢复）。"""
+    if not _is_admin():
+        return False, _t(ADMIN_ZH, ADMIN_EN)
+    hwnd, _pid = _client_window(name)
+    if not hwnd:
+        return False, _t('没有找到该用户的远程窗口', 'No remote window found for this user')
+    _set_visible(hwnd, True)
+    ent = _clients.get(name.lower())
+    if ent:
+        ent['hidden'] = False
+        ent['hwnd'] = hwnd
+    return True, None
+
+
+def restore_hidden_clients():
+    """管理程序退出前把藏起来的窗口放回桌面，别留下「看不见但还连着」的状态。"""
+    for key in list(_clients.keys()):
+        try:
+            if _clients[key].get('hidden'):
+                show_client(key)
+        except Exception:
+            pass
+
+
+atexit.register(restore_hidden_clients)
+
 def reset_session(name):
     """把该用户的会话彻底注销（画面卡死/黑屏时用），下次登录会建全新会话。"""
     if not _is_admin():
@@ -468,13 +712,7 @@ def reset_session(name):
     db = _load()
     info = db.get(name.lower())
     real = info['name'] if info else name
-    prev = _clients.pop(name.lower(), None)
-    if prev is not None and prev.poll() is None:
-        try:
-            prev.terminate()
-            prev.wait(timeout=5)
-        except Exception:
-            pass
+    _kill_client(name.lower())
     sess = _sessions().get(real.lower())
     sid = sess['id'] if sess else None
     if not sid:
@@ -487,24 +725,17 @@ def reset_session(name):
     return True, None
 
 def disconnect_session(name):
-    """断开该用户的远程窗口但**保留会话**。
+    """真正断开该用户的会话（tsdiscon）：会话变 Disc，程序仍在后台但拿不到焦点/画面。
 
-    效果等同直接关掉 FreeRDP 窗口：桌面和里面跑的程序继续留在后台
-    （会话状态变 Disc），下次「登录」会接回原来的桌面，而不是新会话。
-    与「重置」（logoff 注销，程序全部结束）是两件事。
+    界面上默认不给这个按钮 —— 「关掉窗口」用的是 hide_client（藏窗口、不断连，
+    会话保持 Active）。这个函数留给需要彻底释放显示资源时用。
     """
     if not _is_admin():
         return False, _t(ADMIN_ZH, ADMIN_EN)
     db = _load()
     info = db.get(name.lower())
     real = info['name'] if info else name
-    prev = _clients.pop(name.lower(), None)
-    if prev is not None and prev.poll() is None:
-        try:
-            prev.terminate()
-            prev.wait(timeout=5)
-        except Exception:
-            pass
+    _kill_client(name.lower())
     sess = _sessions().get(real.lower())
     if not sess:
         return True, None
@@ -767,10 +998,17 @@ def list_users():
     out = []
     for k, v in db.items():
         st = sess.get(v['name'].lower())
+        ent = _clients.get(v['name'].lower())
+        # window: none 没窗口 / visible 窗口在桌面上 / hidden 收进后台（会话仍 Active）
+        if ent and ent['proc'].poll() is None:
+            win = 'hidden' if ent.get('hidden') else 'visible'
+        else:
+            win = 'visible' if (st and st['state'] == 'active') else 'none'
         out.append({
             'name': v['name'],
             'online': bool(st) and st['state'] == 'active',
             'connected': bool(st),
+            'window': win,
             'state': st['state'] if st else '',
             'managed': not v.get('imported'),
             'pending': bool(v.get('pending')),
@@ -854,11 +1092,20 @@ zh:{
  thUser:'用户', thStatus:'状态', thAct:'操作',
  empty:'还没有用户，点上面按钮创建一个',
  online:'运行中', offline:'不在线', disconnected:'已断开 · 后台运行', pending:'残留', admin:'管理员',
+ bg:'后台运行 · 会话激活',
  disconnect:'断开',
  disconnecting:'正在断开…',
  discOk:'已断开：桌面里的程序仍在后台运行，点「登录」可回到原来的桌面（不是重新开始）',
  discFail:'断开失败：',
+ hide:'隐藏窗口',
+ show:'显示窗口',
+ hiding:'正在把窗口收进后台…',
+ hideOk:'已收进后台：连接没断，会话保持激活（里面的窗口仍有焦点），点「显示窗口」随时回来',
+ hideFail:'收进后台失败：',
+ showOk:'窗口已恢复，桌面还是原来那个',
+ showFail:'恢复窗口失败：',
  tagActiveTitle:'该用户正连接着一个远程桌面会话（占用一个会话名额）',
+ tagBgTitle:'窗口已隐藏但连接还在：会话仍是 Active，程序继续渲染并持有焦点，只是画面看不到',
  tagDiscTitle:'会话仍然保留：桌面里的程序继续在后台运行，点「登录」接回原桌面',
  tagOffTitle:'该用户当前没有会话（从未登录，或已注销）',
  login:'登录', reset:'重置', grant:'授予管理员', del:'删除用户', delPending:'删除残留',
@@ -908,10 +1155,20 @@ en:{
  thUser:'User', thStatus:'Status', thAct:'Actions',
  empty:'No users yet — click the button above to create one.',
  online:'Active', offline:'Offline', disconnected:'Disconnected · running', pending:'Leftover', admin:'Admin',
+ bg:'Background · session active',
  disconnect:'Disconnect',
  disconnecting:'Disconnecting…',
  discOk:'Disconnected - programs keep running in the background; click Login to return to the same desktop',
  discFail:'Disconnect failed: ',
+ hide:'Hide window',
+ show:'Show window',
+ hiding:'Hiding the window…',
+ hideOk:'Moved to background: the connection stays up, so the session is still Active (its windows keep focus). Click Show window to bring it back',
+ hideFail:'Failed to hide: ',
+ showOk:'Window restored - same desktop as before',
+ showFail:'Failed to show the window: ',
+ tagActiveTitle:'This user is connected to a remote desktop session (uses one session slot)',
+ tagBgTitle:'Window hidden but still connected: session stays Active, programs keep rendering and holding focus - just not visible',
  tagActiveTitle:'This user is connected to a remote desktop session (uses one session slot)',
  tagDiscTitle:'The session is kept: programs keep running. Click Login to reconnect to the same desktop',
  tagOffTitle:'No session for this user (never signed in, or signed out)',
@@ -1021,13 +1278,16 @@ if(u.pending){
 return '<tr><td>'+u.name+'</td><td><span class="tag disc" title="'+t('tagPendTitle')+'">'+t('pending')+'</span></td>'+
 '<td><div class="acts"><button class="danger" onclick="del(\''+u.name+'\')">'+t('delPending')+'</button></div></td></tr>';
 }
-const st=u.online?t('online'):(u.connected?t('disconnected'):t('offline'));
-const stTitle=u.online?t('tagActiveTitle'):(u.connected?t('tagDiscTitle'):t('tagOffTitle'));
+const bg=u.online&&u.window==='hidden';
+const st=bg?t('bg'):(u.online?t('online'):(u.connected?t('disconnected'):t('offline')));
+const stTitle=bg?t('tagBgTitle'):(u.online?t('tagActiveTitle'):(u.connected?t('tagDiscTitle'):t('tagOffTitle')));
 const admTag=u.admin?' <span class="tag adm" title="'+t('tagAdmTitle')+'">'+t('admin')+'</span>':'';
 const grantBtn=u.admin?'':'<button class="ghost" onclick="grant(\''+u.name+'\')">'+t('grant')+'</button>';
-const mainBtn=u.online
-?'<button class="ghost" onclick="disconnect(\''+u.name+'\')">'+t('disconnect')+'</button>'
-:'<button class="ghost" onclick="login(\''+u.name+'\')">'+t('login')+'</button>';
+const mainBtn=bg
+?'<button class="ghost" onclick="showWin(\''+u.name+'\')">'+t('show')+'</button>'
+:(u.online
+?'<button class="ghost" onclick="hideWin(\''+u.name+'\')">'+t('hide')+'</button>'
+:'<button class="ghost" onclick="login(\''+u.name+'\')">'+t('login')+'</button>');
 return '<tr><td>'+u.name+admTag+'</td><td><span class="tag '+(u.online?'on':(u.connected?'disc':'off'))+'" title="'+stTitle+'">'+st+'</span></td>'+
 '<td><div class="acts">'+mainBtn+
 '<button class="ghost" onclick="reset(\''+u.name+'\')">'+t('reset')+'</button>'+
@@ -1046,10 +1306,15 @@ else msg(r.error,'err');
 btn.disabled=false;
 refresh();
 }
-async function disconnect(name){
-msg(t('disconnecting'));
-const r=await api('disconnect',{name:name});
-msg(r.ok?t('discOk'):t('discFail')+r.error,r.ok?'ok':'err');
+async function hideWin(name){
+msg(t('hiding'));
+const r=await api('hide',{name:name});
+msg(r.ok?t('hideOk'):t('hideFail')+r.error,r.ok?'ok':'err');
+refresh();
+}
+async function showWin(name){
+const r=await api('show',{name:name});
+msg(r.ok?t('showOk'):t('showFail')+r.error,r.ok?'ok':'err');
 refresh();
 }
 async function login(name){
@@ -1190,6 +1455,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'ok': ok, 'error': err})
         elif p == '/api/reset':
             ok, err = reset_session(body.get('name', ''))
+            self._json({'ok': ok, 'error': err})
+        elif p == '/api/hide':
+            ok, err = hide_client(body.get('name', ''))
+            self._json({'ok': ok, 'error': err})
+        elif p == '/api/show':
+            ok, err = show_client(body.get('name', ''))
             self._json({'ok': ok, 'error': err})
         elif p == '/api/disconnect':
             ok, err = disconnect_session(body.get('name', ''))

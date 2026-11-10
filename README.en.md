@@ -26,10 +26,13 @@ colleagues their own desktop, and so on.
   `sdl3-freerdp.exe` (correct rendering) and falls back to `wfreerdp.exe` / `mstsc`;
   resolution is configurable (auto-match this screen / fullscreen / pick from the
   display's supported modes)
-- **Sessions survive disconnects** — closing the remote window (or clicking Disconnect) only
-  drops the connection: the desktop and its programs keep running in the background, shown as
-  "Disconnected · running"; click Login to reattach to the same desktop. Only Reset signs the
-  session out and ends those programs
+- **Hide instead of disconnect** — "Hide window" only hides the client window; the RDP
+  connection stays up, so the session remains `Active`: programs keep rendering and keep their
+  focus, while the window disappears from the taskbar and Alt+Tab. "Show window" brings it back
+  unchanged. Clicking the window's X really does drop the connection (session becomes
+  `Disc`, which has no input channel and no real focus); the tool then reconnects once in the
+  background to put the session back to `Active` (disable with `keep_alive: false` in
+  `config.json`). Only Reset signs the session out and ends those programs
 - **Session reset** — logs the user's session off to recover from a black/frozen screen; the
   next login starts a fresh desktop
 - **Clean user deletion** — logoff → delete account → delete profile via WMI → force-remove
