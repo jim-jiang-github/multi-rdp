@@ -7,7 +7,10 @@ window, and manage everything from a **system-tray resident** app. Built for run
 isolated environments on a single PC — game multi-boxing, test environments, giving family or
 colleagues their own desktop, and so on.
 
-![Web UI screenshot](docs/screenshot_webui.png)
+![Web UI screenshot](docs/screenshot_webui_en.png)
+
+> The button at the top right switches between English and Chinese instantly
+> (Chinese UI: [docs/screenshot_webui.png](docs/screenshot_webui.png)).
 
 > UI overview: **Create user** generates a random account name + strong password automatically;
 > **Login** opens a separate FreeRDP window against `127.0.0.1`; **Reset** signs the session out
@@ -32,6 +35,8 @@ colleagues their own desktop, and so on.
   (`RDP-Tcp\LoadableProtocol_Object`) and restores the Microsoft protocol with one click
 - **Tray resident** — `MultiRDP.exe` runs in the tray with a menu: Open Web UI / default-admin
   toggle / Exit
+- **Bilingual UI (English / Chinese)** — one-click switch at the top right; the choice is stored
+  in `config.json` (`lang`) and API error messages follow the same language
 
 ## Quick start
 
@@ -73,7 +78,7 @@ multi-rdp/
 │   ├── webui/
 │   │   ├── server.py        # web UI + user management core (127.0.0.1:8123)
 │   │   ├── screencap.py     # pure-ctypes GDI screenshot helper
-│   │   ├── config.json      # UI config (admin_default)
+│   │   ├── config.json      # UI config (admin_default / lang)
 │   │   └── users.json.example  # user DB template (real users.json is ignored)
 │   └── termwrap/            # multi-session patch C++ sources (TermWrap 0.7)
 │       └── ptest/           # offline self-test + live patcher sources

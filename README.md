@@ -8,6 +8,9 @@
 
 ![Web UI 截图](docs/screenshot_webui.png)
 
+> 界面右上角「English / 中文」可实时切换语言（英文界面效果见
+> [docs/screenshot_webui_en.png](docs/screenshot_webui_en.png)）。
+
 > 界面说明：点「创建用户」自动生成随机账号 + 强密码并保存；「登录」用 FreeRDP 连本机
 > 127.0.0.1 打开独立远程桌面；「重置」注销会话（画面卡死时用）；「删除用户」彻底清理
 > 账号、用户目录和注册表残留。
@@ -25,6 +28,7 @@
 - **修复登录白屏**：检测 OpenStreamMS 是否劫持了 RDP 图形管线
   （`RDP-Tcp\LoadableProtocol_Object`），一键还原为微软原版协议
 - **托盘常驻**：`MultiRDP.exe` 后台运行，托盘菜单提供「打开 Web UI / 新用户默认授予管理员 / 退出」
+- **中英双语界面**：右上角一键切换，选择保存在 `config.json`（`lang`），接口返回的错误提示同步切换
 
 ## 快速开始
 
@@ -66,7 +70,7 @@ multi-rdp/
 │   ├── webui/
 │   │   ├── server.py        # Web UI + 用户管理核心（127.0.0.1:8123）
 │   │   ├── screencap.py     # 纯 ctypes GDI 截屏小工具
-│   │   ├── config.json      # 界面配置（admin_default）
+│   │   ├── config.json      # 界面配置（admin_default / lang）
 │   │   └── users.json.example  # 用户库模板（真实 users.json 不入库）
 │   └── termwrap/            # 多会话补丁 C++ 源码（TermWrap 0.7）
 │       └── ptest/           # 离线自检 + 活体补丁器源码
