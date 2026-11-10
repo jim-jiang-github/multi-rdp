@@ -725,6 +725,8 @@ zh:{
  fixing:'正在还原 RDP 协议…',
  fixOk:'已还原。现在点「登录」试试画面；如果还是白屏，重启电脑后即可生效',
  requestFail:'请求失败：',
+ netErr:'连不上后台服务（服务可能已退出，请重启程序）',
+ badResp:'后台返回了无法解析的内容',
  langBtn:'English'
 },
 en:{
@@ -765,6 +767,8 @@ en:{
  fixing:'Restoring the RDP protocol…',
  fixOk:'Restored. Click Login to test the screen; if it is still white, reboot the PC',
  requestFail:'Request failed: ',
+ netErr:'Cannot reach the backend (it may have exited - restart the app)',
+ badResp:'Backend returned an unreadable response',
  langBtn:'中文'
 }
 };
@@ -781,8 +785,12 @@ document.getElementById('chkAdminText').textContent=t('chkAdmin');
 document.getElementById('btnLang').textContent=t('langBtn');
 }
 async function api(path,body){
+try{
 const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
-return await r.json();
+const txt=await r.text();
+if(!txt)return {ok:false,error:t('netErr')+' (HTTP '+r.status+')'};
+try{return JSON.parse(txt)}catch(e){return {ok:false,error:t('badResp')+' (HTTP '+r.status+')'}}
+}catch(e){return {ok:false,error:t('netErr')+' ('+e.message+')'}}
 }
 function msg(t2,cls){const m=document.getElementById('msg');m.textContent=t2||'';m.className=cls||''}
 function applyStatus(s){
@@ -800,7 +808,9 @@ msg(on?t('saveCfgOkAdmin'):t('saveCfgOkNormal'),on?'ok':'');
 }catch(e){msg(t('saveCfgFail')+e,'err')}
 }
 async function refresh(){
-const users=await (await fetch('/api/users')).json();
+let users;
+try{users=await (await fetch('/api/users')).json()}catch(e){return}
+if(!Array.isArray(users))return;
 const el=document.getElementById('list');
 if(!users.length){el.innerHTML='<div class="empty">'+t('empty')+'</div>';return}
 el.innerHTML='<table><tr><th>'+t('thUser')+'</th><th>'+t('thStatus')+'</th><th style="text-align:right">'+t('thAct')+'</th></tr>'+
@@ -899,6 +909,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        try:
+            self._get()
+        except Exception as e:
+            self._fail(e)
+
+    def _get(self):
         if self.path in ('/', '/index.html'):
             body = HTML.encode('utf-8')
             self.send_response(200)
@@ -917,6 +933,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
+        # 任何未预期异常都必须回一个 JSON，否则浏览器只能看到 "Failed to fetch"
+        try:
+            self._post()
+        except Exception as e:
+            self._fail(e)
+
+    def _fail(self, e):
+        try:
+            self._json({'ok': False,
+                        'error': _t('服务端异常：', 'Server error: ') + str(e)}, 500)
+        except Exception:
+            pass
+
+    def _post(self):
         try:
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length) or b'{}')
@@ -925,6 +955,7 @@ class Handler(BaseHTTPRequestHandler):
         p = self.path
         if p == '/api/register':
             user, err = register_user(body.get('name'), body.get('admin'))
+            self._json({'ok': not err, 'user': user, 'error': err})
         elif p == '/api/config':
             # 同时接受 admin_default（新用户默认管理员）与 lang（界面语言）
             if 'admin_default' in body:
