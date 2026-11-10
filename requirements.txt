@@ -1,6 +1,6 @@
-# Web UI 托盘程序运行依赖
+# Tray wrapper dependencies for the web UI
 pystray>=0.19.5
 Pillow>=10.0.0
 
-# 打包工具（scripts/build.bat 会自动安装，无需手动装）
+# Packaging tool (installed automatically by scripts/build.bat)
 # pyinstaller>=6.0

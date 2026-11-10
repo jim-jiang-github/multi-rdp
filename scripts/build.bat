@@ -4,6 +4,8 @@ REM Output: dist\MultiRDP.exe (tray resident; menu: Open Web UI / Settings / Exi
 REM Runtime data (users.json, config.json) and the FreeRDP client live next to the exe.
 REM NOTE: keep this file pure ASCII + CRLF. cmd.exe misparses UTF-8 Chinese text.
 cd /d "%~dp0.."
+REM UTF-8 mode: lets pip/pyinstaller read UTF-8 files on a GBK console
+set PYTHONUTF8=1
 
 where python >nul 2>&1
 if errorlevel 1 (

@@ -4,6 +4,8 @@ REM Starts the user-management web UI with a visible console (so you can read lo
 REM the browser opens http://127.0.0.1:8123 automatically.
 REM NOTE: keep this file pure ASCII + CRLF. cmd.exe misparses UTF-8 Chinese text.
 cd /d "%~dp0.."
+REM UTF-8 mode: keeps console output and file IO consistent on a GBK console
+set PYTHONUTF8=1
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo Requesting administrator permission...
