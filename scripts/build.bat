@@ -22,7 +22,7 @@ if errorlevel 1 (
 )
 
 echo [2/3] Building dist\MultiRDP.exe ...
-python -m PyInstaller --noconfirm --clean --onefile --noconsole --workpath .build --name MultiRDP src\tray_app.py
+python -m PyInstaller --noconfirm --clean --onefile --noconsole --workpath .build --paths src --hidden-import webui.server --name MultiRDP src\tray_app.py
 if errorlevel 1 (
     echo [FAIL] PyInstaller build failed.
     pause & exit /b 1

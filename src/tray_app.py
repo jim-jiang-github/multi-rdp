@@ -14,9 +14,12 @@ import threading
 import webbrowser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, 'webui'))
+# 开发态把 src/ 加进 sys.path，才能以 `webui` 包导入；
+# 打包态（PyInstaller）webui 包已在 sys.path 中，无需处理。
+if not getattr(sys, 'frozen', False):
+    sys.path.insert(0, HERE)
 
-import server as server_mod   # noqa: E402
+from webui import server as server_mod   # noqa: E402
 
 
 def _elevate_and_exit():
@@ -98,4 +101,14 @@ def main():
 
 
 if __name__ == '__main__':
+    # --selftest：只验证打包是否完整（webui.server 可导入、配置可读），
+    # 不启动托盘、不请求管理员权限，用退出码报告结果（0 = 正常）。
+    if '--selftest' in sys.argv:
+        try:
+            server_mod._load_cfg()
+            server_mod._lang()
+            server_mod._freerdp_exe()
+            sys.exit(0)
+        except Exception:
+            sys.exit(1)
     main()
