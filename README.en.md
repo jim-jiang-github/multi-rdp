@@ -148,9 +148,16 @@ the client's frame presentation queues up forever, the main thread stops pumping
 Windows grays the window out. If it stalls long enough, FreeRDP exits on a truncated fastpath
 bitmap update (`Fastpath update Bitmap failed, status 0` in `client.log`).
 
-For this reason the client now defaults to the **SDL software renderer**
+We tried defaulting the client to the **SDL software renderer**
 (`SDL_RENDER_DRIVER=software`, the final blit runs on the CPU), which decouples it from the GPU
-entirely. Set `"software_render": false` in `config.json` to go back to GPU rendering. Measured on
+entirely and eliminates the "Not Responding" state - but in practice it makes the client drop
+frames constantly, the larger the resolution the worse, which feels worse day-to-day than an
+occasional hang. So **GPU rendering stays the default** and the watchdog below covers the hang
+case. If your client hangs and restarts over and over, set `"software_render": true` in
+`config.json` to switch to software rendering. The other measured factor is **resolution**: the
+session desktop follows the client's /w /h, so a larger window multiplies both the in-session
+rendering and the RDP capture/encode cost (1920x1080 is twice the pixels of 1280x800) - prefer a
+smaller window for heavy content. Measured on
 the same machine at the same time: the client of an idle session stayed healthy while the client
 of the game session hung repeatedly - exactly this mechanism.
 

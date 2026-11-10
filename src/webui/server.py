@@ -809,13 +809,15 @@ def _spawn_client(info, hidden=False):
         args += ['/w:%d' % w, '/h:%d' % h]
     else:
         args += ['/f']            # 全屏模式
-    # SDL 默认挑 GPU 加速的渲染后端。回环场景里客户端和远程会话共用同一块 GPU：
-    # 会话里跑游戏把 GPU 占满时，客户端的 present 会一直排队，主线程被卡住，
+    # SDL 默认挑 GPU 加速的渲染后端（快）。回环场景里客户端和远程会话共用同一块
+    # GPU：会话里跑游戏把 GPU 占满时，客户端的 present 会排队，主线程被卡住，
     # 表现为窗口「未响应」（实测 CPU 空闲、8 个线程停在 EventPairLow）。
-    # 软件渲染把最后一步 blit 放到 CPU 上，彻底和 GPU 解耦，游戏再忙也饿不死窗口。
-    # 不想要就在 config.json 里写 "software_render": false。
+    # 但实测软件渲染（blit 放到 CPU）会让客户端持续掉帧变卡——分辨率越大越明显，
+    # 日常体验比偶尔卡死更糟。所以默认走 GPU 渲染，卡死交给 _watch_hung 看门狗
+    # （8 秒内检测到无响应就重启客户端、会话不丢）兜底；
+    # 实在反复卡死就在 config.json 里写 "software_render": true 换回软件渲染。
     env = os.environ.copy()
-    if _load_cfg().get('software_render', True):
+    if _load_cfg().get('software_render', False):
         env['SDL_RENDER_DRIVER'] = 'software'
     si = None
     if hidden:
