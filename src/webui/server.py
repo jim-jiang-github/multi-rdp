@@ -949,7 +949,7 @@ def _restart_hung(key, ent):
         return
     hidden = bool(ent.get('hidden'))
     _log('窗口无响应，重启客户端 %s（窗口原本%s）' % (info['name'], '隐藏' if hidden else '可见'))
-    if _clients.get(key) is ent:
+    if _clients.get(key) and _pid_of(_clients[key]) == _pid_of(ent):
         _clients.pop(key, None)
         _save_clients()
     pid = _pid_of(ent)
