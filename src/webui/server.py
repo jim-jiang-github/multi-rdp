@@ -428,6 +428,9 @@ _user32.GetWindow.restype = ctypes.c_void_p
 _user32.GetWindowTextLengthW.argtypes = [ctypes.c_void_p]
 _user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
 _user32.IsWindowVisible.argtypes = [ctypes.c_void_p]
+_user32.IsIconic.argtypes = [ctypes.c_void_p]
+_user32.GetForegroundWindow.restype = ctypes.c_void_p
+_user32.AttachThreadInput.argtypes = [ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int]
 _user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
 _user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
 _kernel32.OpenProcess.restype = ctypes.c_void_p
@@ -509,12 +512,54 @@ def _client_window(name, key=None):
     return 0, 0
 
 
-def _set_visible(hwnd, visible):
-    """显示 / 隐藏窗口；隐藏失败就退回最小化（最小化同样保持连接、会话仍 Active）。"""
+def _activate_window(hwnd):
+    """把窗口拉到前台并激活（拿到输入焦点）。
+
+    Windows 有「前台锁」：不是前台进程直接调 SetForegroundWindow 会被拒绝，
+    所以按顺序试：直接调 → 模拟一下 ALT 键解锁再调 → AttachThreadInput 把
+    输入队列借过来再调 → SwitchToThisWindow（Alt+Tab 内部用的就是它）。
+    """
+    _user32.ShowWindow(hwnd, SW_RESTORE if _user32.IsIconic(hwnd) else SW_SHOW)
+    if _user32.GetForegroundWindow() == hwnd:
+        return True
+    if _user32.SetForegroundWindow(hwnd):
+        return True
+    # ALT 按下又松开，骗过前台锁（系统会以为用户刚按过键）
+    _user32.keybd_event(0x12, 0, 0, 0)              # ALT down
+    ok = bool(_user32.SetForegroundWindow(hwnd))
+    _user32.keybd_event(0x12, 0, 2, 0)              # ALT up (KEYEVENTF_KEYUP)
+    if ok and _user32.GetForegroundWindow() == hwnd:
+        return True
+    # 借 AttachThreadInput 挂到前台线程的输入队列上，绕开前台锁
+    this_t = _kernel32.GetCurrentThreadId()
+    tgt_t = _user32.GetWindowThreadProcessId(hwnd, None)
+    fg = _user32.GetForegroundWindow()
+    fg_t = _user32.GetWindowThreadProcessId(fg, None) if fg else 0
+    _user32.AttachThreadInput(this_t, tgt_t, True)
+    if fg_t:
+        _user32.AttachThreadInput(this_t, fg_t, True)
+    _user32.BringWindowToTop(hwnd)
+    ok = bool(_user32.SetForegroundWindow(hwnd))
+    _user32.AttachThreadInput(this_t, tgt_t, False)
+    if fg_t:
+        _user32.AttachThreadInput(this_t, fg_t, False)
+    if ok and _user32.GetForegroundWindow() == hwnd:
+        return True
+    # 最后兜底：Alt+Tab 同款
+    try:
+        _user32.SwitchToThisWindow(hwnd, True)
+        return _user32.GetForegroundWindow() == hwnd
+    except AttributeError:
+        return False
+
+
+def _set_visible(hwnd, visible, activate=True):
+    """显示 / 隐藏窗口。显示时默认同时拉到前台激活；隐藏失败就退回最小化
+    （最小化同样保持连接、会话仍 Active）。"""
     if visible:
-        _user32.ShowWindow(hwnd, SW_RESTORE)
-        _user32.ShowWindow(hwnd, SW_SHOW)
-        _user32.SetForegroundWindow(hwnd)
+        if activate:
+            return _activate_window(hwnd)
+        _user32.ShowWindow(hwnd, SW_RESTORE if _user32.IsIconic(hwnd) else SW_SHOW)
         return True
     _user32.ShowWindow(hwnd, SW_HIDE)
     if _user32.IsWindowVisible(hwnd):
@@ -694,11 +739,14 @@ def show_client(name):
 
 
 def restore_hidden_clients():
-    """管理程序退出前把藏起来的窗口放回桌面，别留下「看不见但还连着」的状态。"""
+    """管理程序退出前把藏起来的窗口放回桌面（只显示、不抢前台焦点）。"""
     for key in list(_clients.keys()):
         try:
             if _clients[key].get('hidden'):
-                show_client(key)
+                hwnd, _pid = _client_window(key)
+                if hwnd:
+                    _set_visible(hwnd, True, activate=False)
+                _clients[key]['hidden'] = False
         except Exception:
             pass
 
