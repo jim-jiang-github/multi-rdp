@@ -32,7 +32,9 @@ colleagues their own desktop, and so on.
   unchanged. Clicking the window's X really does drop the connection (session becomes
   `Disc`, which has no input channel and no real focus); the tool then reconnects once in the
   background to put the session back to `Active` (disable with `keep_alive: false` in
-  `config.json`). Only Reset signs the session out and ends those programs
+  `config.json`). Only Reset signs the session out and ends those programs. Window ownership
+  and the hidden flag are stored in `clients.json`, so after the manager restarts it re-adopts
+  the existing windows and "Show window" still works
 - **Session reset** — logs the user's session off to recover from a black/frozen screen; the
   next login starts a fresh desktop
 - **Clean user deletion** — logoff → delete account → delete profile via WMI → force-remove

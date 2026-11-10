@@ -460,6 +460,77 @@ def _exe_of(pid):
         _kernel32.CloseHandle(h)
 
 
+# clients.json：把「哪个进程是哪个用户的远程窗口」「窗口是不是藏着」记在盘上。
+# 不然程序一重启，内存里的映射就没了：窗口明明还藏着（进程活着），界面却当成
+# 可见的，只能点「隐藏窗口」，再也点不回来。
+CLIENTS_FILE = os.path.join(BASE_DIR, 'clients.json')
+
+
+def _pid_of(ent):
+    """条目对应的 pid（自己拉起的用 Popen.pid，接管的用记录里的 pid）。"""
+    if not ent:
+        return 0
+    proc = ent.get('proc')
+    return proc.pid if proc is not None else int(ent.get('pid') or 0)
+
+
+def _alive(ent):
+    """客户端进程是否还活着（进程名必须是远程客户端，防 pid 复用认错人）。"""
+    if not ent:
+        return False
+    proc = ent.get('proc')
+    if proc is not None:
+        return proc.poll() is None
+    pid = int(ent.get('pid') or 0)
+    return bool(pid) and _exe_of(pid) in _CLIENT_EXES
+
+
+def _save_clients():
+    try:
+        data = {}
+        for k, v in list(_clients.items()):
+            if _alive(v):
+                data[k] = {'pid': _pid_of(v), 'hidden': bool(v.get('hidden'))}
+        tmp = CLIENTS_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CLIENTS_FILE)
+    except Exception:
+        pass
+
+
+def _adopt_clients():
+    """启动时把上一轮留下的客户端进程接回来（含隐藏状态），pid 已失效的丢弃。"""
+    try:
+        with open(CLIENTS_FILE, encoding='utf-8') as f:
+            saved = json.load(f)
+    except Exception:
+        return
+    if not isinstance(saved, dict):
+        return
+    for key, info in saved.items():
+        key = str(key).lower()
+        if key in _clients or not isinstance(info, dict):
+            continue
+        pid = int(info.get('pid') or 0)
+        if not pid or _exe_of(pid) not in _CLIENT_EXES:
+            continue
+        _clients[key] = {'proc': None, 'pid': pid, 'hwnd': 0,
+                         'hidden': bool(info.get('hidden')),
+                         'intent': '', 'auto': False, 't0': 0}
+    _save_clients()
+
+
+_adopted = False
+
+
+def _ensure_adopted():
+    global _adopted
+    if not _adopted:
+        _adopted = True
+        _adopt_clients()
+
+
 def _top_windows(pid=None):
     """[(hwnd, pid, title)]，含隐藏窗口；带 owner 的弹层/对话框跳过。"""
     out = []
@@ -485,20 +556,23 @@ def _top_windows(pid=None):
 def _client_window(name, key=None):
     """定位某个用户的远程窗口，返回 (hwnd, pid)；找不到返回 (0, 0)。
 
-    优先用内存里记的 pid；程序重启后内存是空的，就退回按窗口标题认人
-    （标题里带用户名），只有唯一命中时才认，避免藏错窗口。
+    优先用记着的 pid（程序重启后会从 clients.json 接回来）；万一没有记录，
+    再退回按窗口标题认人（FreeRDP 的标题通常只有 "FreeRDP: 127.0.0.1"，
+    认不出人，所以整机只有一个客户端窗口时才认它）。
     """
+    _ensure_adopted()
     key = (key or name).lower()
     ent = _clients.get(key)
-    if ent and ent['proc'].poll() is None:
+    if _alive(ent):
+        pid = _pid_of(ent)
         if ent.get('hwnd'):
-            return ent['hwnd'], ent['proc'].pid
-        wins = _top_windows(ent['proc'].pid)
+            return ent['hwnd'], pid
+        wins = _top_windows(pid)
         # SDL/FreeRDP 会顺手建几个不可见的辅助窗口，优先挑屏幕上真看得见的那个
         wins.sort(key=lambda w: 0 if _user32.IsWindowVisible(w[0]) else 1)
         if wins:
-            return wins[0][0], ent['proc'].pid
-        return 0, ent['proc'].pid
+            return wins[0][0], pid
+        return 0, pid
     low = name.lower()
     hit = [(h, p) for h, p, title in _top_windows()
            if low in title.lower() and _exe_of(p) in _CLIENT_EXES]
@@ -623,8 +697,9 @@ def _connect(info, hidden=False, auto=False):
     if proc.poll() is not None:
         return False, _t('远程窗口启动后立即退出，详见 client.log',
                          'Remote window exited immediately after launch, see client.log')
-    _clients[key] = {'proc': proc, 'hwnd': 0, 'hidden': bool(hidden),
+    _clients[key] = {'proc': proc, 'pid': proc.pid, 'hwnd': 0, 'hidden': bool(hidden),
                      'intent': '', 'auto': auto, 't0': time.time()}
+    _save_clients()
     if hidden:
         threading.Thread(target=_hide_when_ready, args=(key, proc), daemon=True).start()
     threading.Thread(target=_watch_client, args=(key, proc, info), daemon=True).start()
@@ -634,13 +709,21 @@ def _connect(info, hidden=False, auto=False):
 def _kill_client(key):
     """主动关掉客户端进程，并打标记，避免保活线程又把它拉起来。"""
     ent = _clients.pop(key, None)
-    if ent and ent['proc'].poll() is None:
-        ent['intent'] = 'app'
+    if not ent:
+        return
+    ent['intent'] = 'app'
+    proc = ent.get('proc')
+    if proc is not None and proc.poll() is None:
         try:
-            ent['proc'].terminate()
-            ent['proc'].wait(timeout=5)
+            proc.terminate()
+            proc.wait(timeout=5)
         except Exception:
             pass
+    else:
+        pid = _pid_of(ent)          # 接管来的进程没有 Popen，只能按 pid 结束
+        if pid and _exe_of(pid) in _CLIENT_EXES:
+            _run(['taskkill', '/PID', str(pid), '/T', '/F'])
+    _save_clients()
 
 
 def _watch_client(key, proc, info):
@@ -652,10 +735,11 @@ def _watch_client(key, proc, info):
     proc.wait()
     with _lock:
         ent = _clients.get(key)
-        if not ent or ent['proc'] is not proc:
+        if not ent or ent.get('proc') is not proc:
             return
         intent, auto, t0 = ent.get('intent'), ent.get('auto'), ent.get('t0', 0)
         _clients.pop(key, None)
+    _save_clients()
     if intent or auto and time.time() - t0 < 15:
         return                     # 我们自己关的；或者后台重连也秒退，不再循环
     if not _keep_alive():
@@ -681,7 +765,7 @@ def login_user(name):
     if not info:
         return False, _t('用户不存在', 'User not found')
     ent = _clients.get(key)
-    if ent and ent['proc'].poll() is None:
+    if _alive(ent):
         if ent.get('hidden'):
             ok, err = show_client(name)     # 之前收进后台了，直接把窗口请回来
             return (True, None) if ok else (False, err)
@@ -708,33 +792,40 @@ def _mstsc_connect(info):
     return True, None
 
 
+def _track(name, hwnd, pid, hidden):
+    """记住「这个窗口属于这个用户」，并落盘，重启后还能认回来。"""
+    key = name.lower()
+    ent = _clients.get(key)
+    if ent is None and pid:
+        ent = _clients[key] = {'proc': None, 'pid': pid, 'hwnd': hwnd,
+                               'hidden': bool(hidden), 'intent': '', 'auto': False, 't0': 0}
+    if ent:
+        ent['hwnd'] = hwnd
+        ent['hidden'] = bool(hidden)
+    _save_clients()
+
+
 def hide_client(name):
     """把远程窗口收进后台：窗口隐藏、连接不断、会话保持 Active。"""
     if not _is_admin():
         return False, _t(ADMIN_ZH, ADMIN_EN)
-    hwnd, _pid = _client_window(name)
+    hwnd, pid = _client_window(name)
     if not hwnd:
         return False, _t('没有找到该用户的远程窗口', 'No remote window found for this user')
     _set_visible(hwnd, False)
-    ent = _clients.get(name.lower())
-    if ent:
-        ent['hidden'] = True
-        ent['hwnd'] = hwnd
+    _track(name, hwnd, pid, True)
     return True, None
 
 
 def show_client(name):
-    """把收进后台的窗口请回来（会话一直在线，桌面原样恢复）。"""
+    """把收进后台的窗口请回来（激活到前台，会话一直在线，桌面原样恢复）。"""
     if not _is_admin():
         return False, _t(ADMIN_ZH, ADMIN_EN)
-    hwnd, _pid = _client_window(name)
+    hwnd, pid = _client_window(name)
     if not hwnd:
         return False, _t('没有找到该用户的远程窗口', 'No remote window found for this user')
     _set_visible(hwnd, True)
-    ent = _clients.get(name.lower())
-    if ent:
-        ent['hidden'] = False
-        ent['hwnd'] = hwnd
+    _track(name, hwnd, pid, False)
     return True, None
 
 
@@ -749,6 +840,7 @@ def restore_hidden_clients():
                 _clients[key]['hidden'] = False
         except Exception:
             pass
+    _save_clients()
 
 
 atexit.register(restore_hidden_clients)
@@ -857,13 +949,7 @@ def delete_user(name):
         if real.lower() in RESERVED and real.lower() != 'afk':
             return False, _t('系统用户不可删除', 'System accounts cannot be deleted')
         # 0. close the remote window opened by us (else files stay locked)
-        prev = _clients.pop(name.lower(), None)
-        if prev is not None and prev.poll() is None:
-            try:
-                prev.terminate()
-                prev.wait(timeout=5)
-            except Exception:
-                pass
+        _kill_client(name.lower())
         # 1. logoff any session, and wait until it really goes away
         sid_session = (_sessions().get(real.lower()) or {}).get('id')
         if sid_session:
@@ -1015,6 +1101,7 @@ def rdp_repair():
     return True, None
 
 def list_users():
+    _ensure_adopted()
     with _lock:
         db = _load()
         # 1) 远程用户组的成员拉进 db（imported，无密码）
@@ -1043,12 +1130,36 @@ def list_users():
         _save(db)
     sess = _sessions()
     admins = {a.lower() for a in _group_members(ADMIN_GROUP)}
+
+    # 程序重启（或上次崩溃）后内存里没有 pid 记录，但客户端进程可能还活着、
+    # 窗口还藏着。这时候用「只有一个用户缺窗口 + 系统里只有一个空闲客户端窗口」
+    # 来认领，避免多个会话之间张冠李戴。
+    waiting = [v['name'] for v in db.values()
+               if (sess.get(v['name'].lower()) or {}).get('state') == 'active'
+               and not _alive(_clients.get(v['name'].lower()))]
+    if waiting:
+        known = {_pid_of(e) for e in _clients.values() if _alive(e)}
+        free = [(h, p, bool(_user32.IsWindowVisible(h))) for h, p, _t in _top_windows()
+                if p not in known and _exe_of(p) in _CLIENT_EXES]
+        if len(free) == 1 and len(waiting) == 1:
+            h, p, vis = free[0]
+            _clients[waiting[0].lower()] = {'proc': None, 'pid': p, 'hwnd': h,
+                                            'hidden': not vis, 'intent': '',
+                                            'auto': False, 't0': 0}
+            _save_clients()
+
     out = []
     for k, v in db.items():
         st = sess.get(v['name'].lower())
         ent = _clients.get(v['name'].lower())
         # window: none 没窗口 / visible 窗口在桌面上 / hidden 收进后台（会话仍 Active）
-        if ent and ent['proc'].poll() is None:
+        # 有客户端就按窗口真实可见性校正一次：程序重启、上次异常退出后，
+        # 记录里的 hidden 可能已经过时，不校正就会出现「明明藏着却只能点隐藏」。
+        if _alive(ent):
+            hwnd = ent.get('hwnd') or _client_window(v['name'], v['name'].lower())[0]
+            if hwnd:
+                ent['hwnd'] = hwnd
+                ent['hidden'] = not bool(_user32.IsWindowVisible(hwnd))
             win = 'hidden' if ent.get('hidden') else 'visible'
         else:
             win = 'visible' if (st and st['state'] == 'active') else 'none'
