@@ -204,6 +204,16 @@ def _available_resolutions():
     except Exception:
         return []
 
+# 常用桌面分辨率：远程会话的桌面大小由客户端决定，不必等于显示器支持的模式，
+# 所以即使驱动只报告当前模式（虚拟显示/远程环境常见），也提供这些档位。
+COMMON_RES = ('3840x2160', '2560x1600', '2560x1440', '1920x1200', '1920x1080',
+              '1680x1050', '1600x900', '1440x900', '1366x768', '1280x1024',
+              '1280x800', '1280x720', '1024x768')
+
+def _common_resolutions(modes):
+    """常用分辨率里去掉本机已枚举到的，避免下拉框重复。"""
+    return [m for m in COMMON_RES if m not in modes]
+
 def _rdp_geometry():
     """按配置算出 FreeRDP 的 /w /h（fullscreen 模式不需要）。"""
     res = resolution()
@@ -786,7 +796,8 @@ tr:last-child td{border-bottom:none}
 <select id="resSel" onchange="saveRes()">
 <option value="auto" id="resAuto">跟随本机屏幕</option>
 <option value="fullscreen" id="resFull">全屏（无窗口边框）</option>
-<!-- 显示器支持的固定分辨率由 /api/status 动态填充 -->
+<optgroup label="本机支持" id="grpNative"></optgroup>
+<optgroup label="常用分辨率" id="grpCommon"></optgroup>
 </select></div>
 <div id="list"></div>
 <div id="msg"></div>
@@ -837,6 +848,8 @@ zh:{
  resLabel:'远程桌面分辨率',
  resAuto:'跟随本机屏幕',
  resFull:'全屏（无窗口边框）',
+ grpNative:'本机支持',
+ grpCommon:'常用分辨率',
  langBtn:'English'
 },
 en:{
@@ -882,6 +895,8 @@ en:{
  resLabel:'Remote desktop resolution',
  resAuto:'Match this screen',
  resFull:'Fullscreen (borderless)',
+ grpNative:'Supported by this display',
+ grpCommon:'Common resolutions',
  langBtn:'中文'
 }
 };
@@ -898,6 +913,8 @@ document.getElementById('chkAdminText').textContent=t('chkAdmin');
 document.getElementById('resLabel').textContent=t('resLabel');
 document.getElementById('resAuto').textContent=t('resAuto');
 document.getElementById('resFull').textContent=t('resFull');
+document.getElementById('grpNative').label=t('grpNative');
+document.getElementById('grpCommon').label=t('grpCommon');
 document.getElementById('btnLang').textContent=t('langBtn');
 }
 async function api(path,body){
@@ -916,14 +933,17 @@ const fix=document.getElementById('btnFix');
 if(s&&s.rdp_hijacked){fix.style.display='inline-block'}else{fix.style.display='none'}
 if(s){document.getElementById('chkAdmin').checked=!!s.admin_default;
 const rs=document.getElementById('resSel');
-if(Array.isArray(s.modes)&&s.modes.length){
-for(const o of [...rs.options])if(/^\d+x\d+$/.test(o.value))o.remove();
-for(const m of s.modes){
-if(![...rs.options].some(o=>o.value===m)){
-const op=document.createElement('option');op.value=m;op.textContent=m.replace('x',' \u00d7 ');rs.appendChild(op);
+function fillGroup(id,list){
+const g=document.getElementById(id);if(!g)return;
+g.innerHTML='';
+for(const m of (list||[])){
+const op=document.createElement('option');op.value=m;op.textContent=m.replace('x',' \u00d7 ');g.appendChild(op);
 }}
+fillGroup('grpNative',s.modes);
+fillGroup('grpCommon',s.common);
+if(s.resolution&&s.resolution!==rs.value)rs.value=s.resolution;
+if(!rs.value)rs.value='auto';
 }
-if(s.resolution)rs.value=s.resolution;}
 }
 async function saveCfg(){
 const on=document.getElementById('chkAdmin').checked;
@@ -1055,10 +1075,11 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == '/api/users':
             self._json(list_users())
         elif self.path == '/api/status':
+            modes = _available_resolutions()
             self._json({'admin': _is_admin(), 'rdp_hijacked': rdp_hijacked(),
                         'admin_default': admin_default(), 'lang': _lang(),
                         'resolution': resolution(),
-                        'modes': _available_resolutions()})
+                        'modes': modes, 'common': _common_resolutions(modes)})
         else:
             self.send_error(404)
 
