@@ -26,6 +26,10 @@ colleagues their own desktop, and so on.
   `sdl3-freerdp.exe` (correct rendering) and falls back to `wfreerdp.exe` / `mstsc`;
   resolution is configurable (auto-match this screen / fullscreen / pick from the
   display's supported modes)
+- **Sessions survive disconnects** — closing the remote window (or clicking Disconnect) only
+  drops the connection: the desktop and its programs keep running in the background, shown as
+  "Disconnected · running"; click Login to reattach to the same desktop. Only Reset signs the
+  session out and ends those programs
 - **Session reset** — logs the user's session off to recover from a black/frozen screen; the
   next login starts a fresh desktop
 - **Clean user deletion** — logoff → delete account → delete profile via WMI → force-remove

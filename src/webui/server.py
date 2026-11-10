@@ -287,7 +287,7 @@ def _sessions():
             for i, t in enumerate(toks[:-1]):
                 if toks[i + 1].isdigit() and t.lower() != 'services' and not t.isdigit():
                     result[t.lower()] = {'id': toks[i + 1],
-                                         'state': toks[i + 2].lower() if len(toks) > i + 2 else ''}
+                                         'state': _state_norm(toks[i + 2] if len(toks) > i + 2 else '')}
                     break
         return result
     head = lines[hdr]
@@ -308,8 +308,17 @@ def _sessions():
             continue
         if name.lower() in ('services', '会话名', '用户名') or name.isdigit():
             continue
-        result[name.lower()] = {'id': sid, 'state': state[0].lower() if state else ''}
+        result[name.lower()] = {'id': sid, 'state': _state_norm(state[0] if state else '')}
     return result
+
+def _state_norm(s):
+    """把 query session 的 STATE 归一化（不同语言/版本的输出不一致）。"""
+    s = (s or '').strip().lower()
+    if s.startswith('disc') or '断开' in s:
+        return 'disc'
+    if s.startswith('active') or '运行' in s or '活动' in s:
+        return 'active'
+    return s
 
 def _sync_users():
     """merge group members into managed db (imported, no password)."""
@@ -475,6 +484,37 @@ def reset_session(name):
         return False, _t('注销会话失败: ', 'Failed to sign out session: ') + (
             out.strip() or _t('未知错误', 'unknown error'))
     time.sleep(1.5)
+    return True, None
+
+def disconnect_session(name):
+    """断开该用户的远程窗口但**保留会话**。
+
+    效果等同直接关掉 FreeRDP 窗口：桌面和里面跑的程序继续留在后台
+    （会话状态变 Disc），下次「登录」会接回原来的桌面，而不是新会话。
+    与「重置」（logoff 注销，程序全部结束）是两件事。
+    """
+    if not _is_admin():
+        return False, _t(ADMIN_ZH, ADMIN_EN)
+    db = _load()
+    info = db.get(name.lower())
+    real = info['name'] if info else name
+    prev = _clients.pop(name.lower(), None)
+    if prev is not None and prev.poll() is None:
+        try:
+            prev.terminate()
+            prev.wait(timeout=5)
+        except Exception:
+            pass
+    sess = _sessions().get(real.lower())
+    if not sess:
+        return True, None
+    if sess['state'] != 'active':
+        return True, None          # 已经是断开状态，无需再断
+    rc, out = _run(['tsdiscon', sess['id']])
+    if rc != 0:
+        return False, _t('断开失败: ', 'Failed to disconnect: ') + (
+            out.strip() or _t('未知错误', 'unknown error'))
+    time.sleep(1.0)
     return True, None
 
 def _force_rmtree(path, timeout=120):
@@ -813,7 +853,14 @@ zh:{
  chkAdmin:'新用户授予管理员权限（启动需要管理员的程序时不用输密码）',
  thUser:'用户', thStatus:'状态', thAct:'操作',
  empty:'还没有用户，点上面按钮创建一个',
- online:'在线', offline:'离线', disconnected:'已断开', pending:'残留', admin:'管理员',
+ online:'运行中', offline:'不在线', disconnected:'已断开 · 后台运行', pending:'残留', admin:'管理员',
+ disconnect:'断开',
+ disconnecting:'正在断开…',
+ discOk:'已断开：桌面里的程序仍在后台运行，点「登录」可回到原来的桌面（不是重新开始）',
+ discFail:'断开失败：',
+ tagActiveTitle:'该用户正连接着一个远程桌面会话（占用一个会话名额）',
+ tagDiscTitle:'会话仍然保留：桌面里的程序继续在后台运行，点「登录」接回原桌面',
+ tagOffTitle:'该用户当前没有会话（从未登录，或已注销）',
  login:'登录', reset:'重置', grant:'授予管理员', del:'删除用户', delPending:'删除残留',
  tagAdmTitle:'已在管理员组：UAC 弹窗只需点一下「是」，不用输密码',
  tagPendTitle:'账号或文件没删干净，点右侧按钮继续清理',
@@ -860,7 +907,14 @@ en:{
  chkAdmin:'Grant administrator rights to new users (no password prompt on UAC)',
  thUser:'User', thStatus:'Status', thAct:'Actions',
  empty:'No users yet — click the button above to create one.',
- online:'Online', offline:'Offline', disconnected:'Disconnected', pending:'Leftover', admin:'Admin',
+ online:'Active', offline:'Offline', disconnected:'Disconnected · running', pending:'Leftover', admin:'Admin',
+ disconnect:'Disconnect',
+ disconnecting:'Disconnecting…',
+ discOk:'Disconnected - programs keep running in the background; click Login to return to the same desktop',
+ discFail:'Disconnect failed: ',
+ tagActiveTitle:'This user is connected to a remote desktop session (uses one session slot)',
+ tagDiscTitle:'The session is kept: programs keep running. Click Login to reconnect to the same desktop',
+ tagOffTitle:'No session for this user (never signed in, or signed out)',
  login:'Login', reset:'Reset', grant:'Grant admin', del:'Delete', delPending:'Clean up',
  tagAdmTitle:'Already in Administrators: UAC only needs a click, no password',
  tagPendTitle:'Account or files were not fully removed — click to continue cleaning up',
@@ -968,10 +1022,14 @@ return '<tr><td>'+u.name+'</td><td><span class="tag disc" title="'+t('tagPendTit
 '<td><div class="acts"><button class="danger" onclick="del(\''+u.name+'\')">'+t('delPending')+'</button></div></td></tr>';
 }
 const st=u.online?t('online'):(u.connected?t('disconnected'):t('offline'));
+const stTitle=u.online?t('tagActiveTitle'):(u.connected?t('tagDiscTitle'):t('tagOffTitle'));
 const admTag=u.admin?' <span class="tag adm" title="'+t('tagAdmTitle')+'">'+t('admin')+'</span>':'';
 const grantBtn=u.admin?'':'<button class="ghost" onclick="grant(\''+u.name+'\')">'+t('grant')+'</button>';
-return '<tr><td>'+u.name+admTag+'</td><td><span class="tag '+(u.online?'on':(u.connected?'disc':'off'))+'">'+st+'</span></td>'+
-'<td><div class="acts"><button class="ghost" onclick="login(\''+u.name+'\')">'+t('login')+'</button>'+
+const mainBtn=u.online
+?'<button class="ghost" onclick="disconnect(\''+u.name+'\')">'+t('disconnect')+'</button>'
+:'<button class="ghost" onclick="login(\''+u.name+'\')">'+t('login')+'</button>';
+return '<tr><td>'+u.name+admTag+'</td><td><span class="tag '+(u.online?'on':(u.connected?'disc':'off'))+'" title="'+stTitle+'">'+st+'</span></td>'+
+'<td><div class="acts">'+mainBtn+
 '<button class="ghost" onclick="reset(\''+u.name+'\')">'+t('reset')+'</button>'+
 grantBtn+
 '<button class="danger" onclick="del(\''+u.name+'\')">'+t('del')+'</button></div></td></tr>';
@@ -986,6 +1044,12 @@ if(r.ok)msg(t(r.user.admin?'createdAdmin':'createdNormal',{name:r.user.name}),'o
 else msg(r.error,'err');
 }catch(e){msg(t('requestFail')+e,'err')}
 btn.disabled=false;
+refresh();
+}
+async function disconnect(name){
+msg(t('disconnecting'));
+const r=await api('disconnect',{name:name});
+msg(r.ok?t('discOk'):t('discFail')+r.error,r.ok?'ok':'err');
 refresh();
 }
 async function login(name){
@@ -1126,6 +1190,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'ok': ok, 'error': err})
         elif p == '/api/reset':
             ok, err = reset_session(body.get('name', ''))
+            self._json({'ok': ok, 'error': err})
+        elif p == '/api/disconnect':
+            ok, err = disconnect_session(body.get('name', ''))
             self._json({'ok': ok, 'error': err})
         elif p == '/api/rdp_repair':
             ok, err = rdp_repair()
