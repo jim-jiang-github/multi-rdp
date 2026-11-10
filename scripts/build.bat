@@ -1,6 +1,7 @@
 @echo off
 REM ==== MultiRDP build script: package the web UI + tray app into one exe ====
 REM Output: dist\MultiRDP.exe (tray resident) + dist\FreeRDP (client, copied automatically)
+REM PyInstaller works in .build (auto-removed when the build succeeds).
 REM Runtime data (users.json, config.json) is created next to the exe on first run.
 REM NOTE: keep this file pure ASCII + CRLF. cmd.exe misparses UTF-8 Chinese text.
 cd /d "%~dp0.."
@@ -21,7 +22,7 @@ if errorlevel 1 (
 )
 
 echo [2/3] Building dist\MultiRDP.exe ...
-python -m PyInstaller --noconfirm --clean --onefile --noconsole --name MultiRDP src\tray_app.py
+python -m PyInstaller --noconfirm --clean --onefile --noconsole --workpath .build --name MultiRDP src\tray_app.py
 if errorlevel 1 (
     echo [FAIL] PyInstaller build failed.
     pause & exit /b 1
@@ -39,6 +40,8 @@ if errorlevel 1 (
 )
 
 :done
+REM PyInstaller work dir is temporary - remove it after a successful build
+if exist ".build" rd /s /q ".build"
 echo.
 echo ==== BUILD OK ====
 echo Output : dist\MultiRDP.exe
