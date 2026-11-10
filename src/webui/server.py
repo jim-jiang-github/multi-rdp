@@ -93,6 +93,26 @@ def _save_cfg(cfg):
     with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
+def _lang():
+    """界面/接口语言：zh（默认）或 en，持久化在 config.json 的 lang 字段。"""
+    v = _load_cfg().get('lang')
+    return v if v in ('zh', 'en') else 'zh'
+
+def set_lang(lang):
+    if lang not in ('zh', 'en'):
+        return _lang()
+    cfg = _load_cfg()
+    cfg['lang'] = lang
+    _save_cfg(cfg)
+    return lang
+
+def _t(zh, en):
+    """按当前语言返回文案。"""
+    return zh if _lang() == 'zh' else en
+
+ADMIN_ZH = '需要管理员权限：请以管理员身份重新运行本程序'
+ADMIN_EN = 'Administrator rights required: please run this program as administrator'
+
 def admin_default():
     """新建用户默认是否授予管理员权限（界面上的勾选项，持久化到 config.json）。"""
     return bool(_load_cfg().get('admin_default', True))
@@ -200,7 +220,7 @@ def _sync_users():
 
 def register_user(name=None, admin=None):
     if not _is_admin():
-        return None, '需要管理员权限：请关掉本窗口，右键 start.bat 选「以管理员身份运行」'
+        return None, _t(ADMIN_ZH, ADMIN_EN)
     with _lock:
         db = _load()
         existing = _all_local_users()
@@ -208,20 +228,23 @@ def register_user(name=None, admin=None):
         if not name:
             name = rand_name(existing | set(db.keys()))
         if not NAME_RE.match(name):
-            return None, '用户名只能用字母开头，含字母/数字/_/-，最长20位'
+            return None, _t('用户名只能用字母开头，含字母/数字/_/-，最长20位',
+                            'Username must start with a letter and contain only letters/digits/_/- (max 20 chars)')
         if name.lower() in RESERVED or name.lower() in existing:
-            return None, f'用户名 {name} 已存在或不可用'
+            return None, _t('用户名 %s 已存在或不可用' % name,
+                            'Username %s already exists or is unavailable' % name)
         password = rand_password()
         rc, out = _run(['net', 'user', name, password, '/add',
                         '/passwordchg:no', '/expires:never', '/active:yes'])
         if rc != 0:
             tail = out.strip().splitlines()
-            return None, '创建失败: ' + (tail[-1] if tail else '未知错误')
+            return None, _t('创建失败: ', 'Create failed: ') + (tail[-1] if tail else _t('未知错误', 'unknown error'))
         rc, out = _run(['net', 'localgroup', RDP_GROUP, name, '/add'])
         if rc != 0:
             _run(['net', 'user', name, '/delete'])
             tail = out.strip().splitlines()
-            return None, '加入远程用户组失败: ' + (tail[-1] if tail else '未知错误')
+            return None, _t('加入远程用户组失败: ', 'Failed to join Remote Desktop Users: ') + (
+                tail[-1] if tail else _t('未知错误', 'unknown error'))
         # 按界面勾选决定是否进管理员组：UAC 从“输入管理员密码”变成“点一下是”
         if admin is None:
             admin = admin_default()
@@ -240,13 +263,13 @@ def grant_admin(name):
     注意：组权限在登录令牌里，已登录的会话必须注销重登（点「重置」再「登录」）才生效。
     """
     if not _is_admin():
-        return False, '需要管理员权限：请关掉本窗口，右键 start.bat 选「以管理员身份运行」'
+        return False, _t(ADMIN_ZH, ADMIN_EN)
     with _lock:
         db = _load()
         info = db.get(name.lower())
         real = info['name'] if info else (name or '').strip()
         if not real:
-            return False, '用户不存在'
+            return False, _t('用户不存在', 'User not found')
         if real.lower() in _group_members(ADMIN_GROUP):
             return True, None
         rc, out = _run(['net', 'localgroup', ADMIN_GROUP, real, '/add'])
@@ -254,7 +277,8 @@ def grant_admin(name):
             if real.lower() in _group_members(ADMIN_GROUP):
                 return True, None
             tail = [l for l in out.strip().splitlines() if l.strip()]
-            return False, '加入管理员组失败: ' + (tail[-1] if tail else '未知错误')
+            return False, _t('加入管理员组失败: ', 'Failed to join Administrators: ') + (
+                tail[-1] if tail else _t('未知错误', 'unknown error'))
         return True, None
 
 def _freerdp_exe():
@@ -277,12 +301,13 @@ def login_user(name):
     key = name.lower()
     info = db.get(key)
     if not info:
-        return False, '用户不存在'
+        return False, _t('用户不存在', 'User not found')
     prev = _clients.get(key)
     if prev is not None and prev.poll() is None:
         return True, None          # 窗口已经开着，不重复弹
     if not info.get('password'):
-        return False, '该用户没有保存密码，无法一键登录（可删除后重新注册）'
+        return False, _t('该用户没有保存密码，无法一键登录（可删除后重新注册）',
+                         'This user has no saved password, one-click login is unavailable (delete and re-create it)')
     pwd = info['password']
     exe = _freerdp_exe()
     if exe:
@@ -299,10 +324,11 @@ def login_user(name):
                 args, cwd=os.path.dirname(exe), stdout=logf, stderr=logf,
                 creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
         except Exception as e:
-            return False, '启动远程窗口失败: ' + str(e)
+            return False, _t('启动远程窗口失败: ', 'Failed to launch remote window: ') + str(e)
         time.sleep(3.0)
         if proc.poll() is not None:
-            return False, '远程窗口启动后立即退出，详见 client.log'
+            return False, _t('远程窗口启动后立即退出，详见 client.log',
+                             'Remote window exited immediately after launch, see client.log')
         _clients[key] = proc
         return True, None
     # 兜底：没有 wfreerdp 就用 mstsc
@@ -312,13 +338,13 @@ def login_user(name):
         subprocess.Popen(['mstsc', '/v:127.0.0.2', '/w:1280', '/h:800'],
                          creationflags=subprocess.CREATE_NO_WINDOW)
     except Exception as e:
-        return False, '启动远程窗口失败: ' + str(e)
+        return False, _t('启动远程窗口失败: ', 'Failed to launch remote window: ') + str(e)
     return True, None
 
 def reset_session(name):
     """把该用户的会话彻底注销（画面卡死/黑屏时用），下次登录会建全新会话。"""
     if not _is_admin():
-        return False, '需要管理员权限：请关掉本窗口，右键 start.bat 选「以管理员身份运行」'
+        return False, _t(ADMIN_ZH, ADMIN_EN)
     db = _load()
     info = db.get(name.lower())
     real = info['name'] if info else name
@@ -335,7 +361,8 @@ def reset_session(name):
         return True, None
     rc, out = _run(['logoff', sid])
     if rc != 0:
-        return False, '注销会话失败: ' + (out.strip() or '未知错误')
+        return False, _t('注销会话失败: ', 'Failed to sign out session: ') + (
+            out.strip() or _t('未知错误', 'unknown error'))
     time.sleep(1.5)
     return True, None
 
@@ -385,20 +412,20 @@ def _user_leftovers(name):
     """删除后仍残留的内容。返回描述列表，全部删干净返回 []。"""
     left = []
     if name.lower() in _all_local_users():
-        left.append('账号仍然存在')
+        left.append(_t('账号仍然存在', 'account still exists'))
     if _user_dir_exists(name):
-        left.append('用户目录 C:\\Users\\%s 没能删掉' % name)
+        left.append(_t('用户目录 C:\\Users\\%s 没能删掉', 'profile folder C:\\Users\\%s could not be removed') % name)
     return left
 
 def delete_user(name):
     if not _is_admin():
-        return False, '需要管理员权限：请关掉本窗口，右键 start.bat 选「以管理员身份运行」'
+        return False, _t(ADMIN_ZH, ADMIN_EN)
     with _lock:
         db = _load()
         info = db.get(name.lower())
         real = info['name'] if info else name
         if real.lower() in RESERVED and real.lower() != 'afk':
-            return False, '系统用户不可删除'
+            return False, _t('系统用户不可删除', 'System accounts cannot be deleted')
         # 0. close the remote window opened by us (else files stay locked)
         prev = _clients.pop(name.lower(), None)
         if prev is not None and prev.poll() is None:
@@ -425,7 +452,8 @@ def delete_user(name):
         if real.lower() in _all_local_users():
             rc, out = _run(['net', 'user', real, '/delete'])
             if rc != 0:
-                return False, '删除失败: ' + (out.strip().splitlines()[-1] if out.strip() else '未知错误')
+                return False, _t('删除失败: ', 'Delete failed: ') + (
+                    out.strip().splitlines()[-1] if out.strip() else _t('未知错误', 'unknown error'))
         # 4. remove profile dir (WMI 以 SYSTEM 身份删，能解掉残留的 NTUSER.DAT 占用)
         if profile_dir and os.path.isdir(profile_dir) and profile_dir.lower().startswith('c:\\users\\'):
             ps = ("Get-CimInstance Win32_UserProfile | Where-Object {{$_.LocalPath -eq '{0}'}} | "
@@ -457,7 +485,8 @@ def delete_user(name):
             else:
                 db[key] = {'name': real, 'password': None, 'imported': True, 'pending': True}
             _save(db)
-            return False, '、'.join(left) + '。该用户已保留在列表中，可再点「删除」重试清理'
+            return False, _t('、'.join(left) + '。该用户已保留在列表中，可再点「删除」重试清理',
+                             '; '.join(left) + '. The user is kept in the list — click Delete again to retry')
         db.pop(name.lower(), None)
         _save(db)
         return True, None
@@ -516,20 +545,22 @@ def rdp_repair():
     """把 RDP-Tcp 的协议对象还原为微软原版（rdpcorets），恢复标准图形管线。
     不重启 TermService（OSMS 源码注明强停该服务会挂死）；若新连接仍不生效需重启电脑。"""
     if not _is_admin():
-        return False, '需要管理员权限：请关掉本窗口，右键 start.bat 选「以管理员身份运行」'
+        return False, _t(ADMIN_ZH, ADMIN_EN)
     import winreg
     try:
         k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _RDP_TCP_KEY,
                            0, winreg.KEY_READ | winreg.KEY_WRITE)
     except OSError as e:
-        return False, '打开注册表失败: ' + str(e)
+        return False, _t('打开注册表失败: ', 'Failed to open registry key: ') + str(e)
     try:
         try:
             cur, _ = winreg.QueryValueEx(k, 'LoadableProtocol_Object')
         except OSError:
-            return False, '注册表里没有 LoadableProtocol_Object，环境异常，不处理'
+            return False, _t('注册表里没有 LoadableProtocol_Object，环境异常，不处理',
+                             'LoadableProtocol_Object missing from registry; environment looks abnormal, skipping')
         if str(cur).lower() != _OSMS_PROVIDER_CLSID.lower():
-            return False, 'RDP 图形管线当前没有被劫持，无需修复'
+            return False, _t('RDP 图形管线当前没有被劫持，无需修复',
+                             'The RDP graphics pipeline is not hijacked, nothing to repair')
         # 还原为 OSMS 安装时备份的原始协议对象，找不到就用微软原版 CLSID
         try:
             inner, _ = winreg.QueryValueEx(k, 'OsmsInnerProtocol_Object')
@@ -597,7 +628,7 @@ def list_users():
     out.sort(key=lambda x: (not x['pending'], not x['managed'], x['name'].lower()))
     return out
 
-HTML = """<!DOCTYPE html>
+HTML = r"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <title>用户管理</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -606,6 +637,7 @@ HTML = """<!DOCTYPE html>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;display:flex;justify-content:center;padding:40px 16px}
 .wrap{width:100%;max-width:640px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 h1{font-size:22px;font-weight:600;margin-bottom:4px}
 .sub{color:var(--sub);font-size:13px;margin-bottom:24px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;box-shadow:0 1px 2px rgba(20,20,50,.04)}
@@ -634,10 +666,13 @@ tr:last-child td{border-bottom:none}
 #msg{margin-top:14px;font-size:13px;min-height:20px}
 .ok{color:var(--ok)}.err{color:var(--bad)}
 .empty{color:var(--sub);text-align:center;padding:28px 0;font-size:14px}
+.langbtn{height:32px;padding:0 12px;font-size:13px;flex:0 0 auto}
 </style></head><body>
 <div class="wrap">
-<h1>用户管理</h1>
-<div class="sub">点一下自动创建一个独立账号，密码由程序随机生成并保存</div>
+<div class="top">
+<div><h1 id="ttl">用户管理</h1><div class="sub" id="sub"></div></div>
+<button class="ghost langbtn" id="btnLang" onclick="toggleLang()">English</button>
+</div>
 <div id="banner"></div>
 <div class="card">
 <div class="row">
@@ -645,98 +680,210 @@ tr:last-child td{border-bottom:none}
 <button class="danger" id="btnFix" style="display:none" onclick="fixRdp()">修复画面</button>
 </div>
 <label class="chk" title="勾选后新账号加入管理员组：启动需要管理员的程序（如游戏启动器）时 UAC 只需点「是」，不用输管理员密码">
-<input type="checkbox" id="chkAdmin" onchange="saveCfg()"><span>新用户授予管理员权限（启动需要管理员的程序时不用输密码）</span></label>
+<input type="checkbox" id="chkAdmin" onchange="saveCfg()"><span id="chkAdminText">新用户授予管理员权限（启动需要管理员的程序时不用输密码）</span></label>
 <div id="list"></div>
 <div id="msg"></div>
 </div>
 </div>
 <script>
+const I18N={
+zh:{
+ title:'用户管理',
+ subtitle:'点一下自动创建一个独立账号，密码由程序随机生成并保存',
+ btnNew:'+ 创建用户（自动生成账号密码）',
+ btnFix:'修复画面',
+ chkAdmin:'新用户授予管理员权限（启动需要管理员的程序时不用输密码）',
+ thUser:'用户', thStatus:'状态', thAct:'操作',
+ empty:'还没有用户，点上面按钮创建一个',
+ online:'在线', offline:'离线', disconnected:'已断开', pending:'残留', admin:'管理员',
+ login:'登录', reset:'重置', grant:'授予管理员', del:'删除用户', delPending:'删除残留',
+ tagAdmTitle:'已在管理员组：UAC 弹窗只需点一下「是」，不用输密码',
+ tagPendTitle:'账号或文件没删干净，点右侧按钮继续清理',
+ bannerNoAdmin:'⚠ 当前没有管理员权限，创建/删除会失败。请以管理员身份重新运行本程序。',
+ creating:'正在创建…',
+ createdAdmin:'已创建用户 {name}（管理员权限：启动需要管理员的程序只需点「是」），点「登录」即可进入',
+ createdNormal:'已创建用户 {name}（普通用户：启动需要管理员的程序时要输密码），点「登录」即可进入',
+ opening:'正在打开远程窗口…',
+ loginOk:'已发起登录，请留意弹出的远程窗口',
+ loginFail:'登录失败：',
+ resetConfirm:'重置会把 {name} 的会话注销（里面的程序会关闭），确认？',
+ resetting:'正在重置会话…',
+ resetOk:'会话已重置，现在点「登录」会进入全新桌面',
+ resetFail:'重置失败：',
+ grantConfirm:'把 {name} 加入管理员组？\n\n之后它启动需要管理员权限的程序（比如游戏启动器）时，UAC 弹窗只需点一下「是」，不用再输管理员密码。\n\n注意：已经登录的会话要注销重登才生效（先点「重置」再点「登录」）。',
+ granting:'正在授予管理员权限…',
+ grantOk:'{name} 已加入管理员组，点「重置」再「登录」后生效',
+ grantFail:'授予失败：',
+ delConfirm:'确定删除用户 {name} ？账号和文件都会清理掉。',
+ deleting:'正在删除 {name} …',
+ deleted:'已删除 {name}',
+ delFail:'删除失败：',
+ saveCfgOkAdmin:'已保存：新创建的用户会自动授予管理员权限',
+ saveCfgOkNormal:'已保存：新创建的用户为普通用户（启动需要管理员的程序时要输管理员密码）',
+ saveCfgFail:'保存设置失败：',
+ fixConfirm:'检测到 OpenStreamMS 接管了 RDP 图形管线（登录后白屏的原因）。\n\n修复会把 RDP 协议还原为 Windows 原版，影响：\n· 修复后 OpenStreamMS 的串流功能将不可用（可随时用它的安装脚本恢复）\n· 修复完成后请点「登录」验证画面；如果仍白屏，重启一次电脑即可生效\n\n确认修复？',
+ fixing:'正在还原 RDP 协议…',
+ fixOk:'已还原。现在点「登录」试试画面；如果还是白屏，重启电脑后即可生效',
+ requestFail:'请求失败：',
+ langBtn:'English'
+},
+en:{
+ title:'User Management',
+ subtitle:'Create an isolated local account in one click — the password is generated and saved automatically',
+ btnNew:'+ Create user (auto username & password)',
+ btnFix:'Fix display',
+ chkAdmin:'Grant administrator rights to new users (no password prompt on UAC)',
+ thUser:'User', thStatus:'Status', thAct:'Actions',
+ empty:'No users yet — click the button above to create one.',
+ online:'Online', offline:'Offline', disconnected:'Disconnected', pending:'Leftover', admin:'Admin',
+ login:'Login', reset:'Reset', grant:'Grant admin', del:'Delete', delPending:'Clean up',
+ tagAdmTitle:'Already in Administrators: UAC only needs a click, no password',
+ tagPendTitle:'Account or files were not fully removed — click to continue cleaning up',
+ bannerNoAdmin:'⚠ No administrator rights: creating/deleting users will fail. Please run this program as administrator.',
+ creating:'Creating…',
+ createdAdmin:'User {name} created (administrator: programs that need admin rights only require a click on UAC). Click Login to enter',
+ createdNormal:'User {name} created (standard user: programs that need admin rights will ask for an admin password). Click Login to enter',
+ opening:'Opening remote window…',
+ loginOk:'Login started — look for the remote desktop window',
+ loginFail:'Login failed: ',
+ resetConfirm:'Resetting will sign {name} out (running programs will close). Continue?',
+ resetting:'Resetting session…',
+ resetOk:'Session reset — the next Login starts a fresh desktop',
+ resetFail:'Reset failed: ',
+ grantConfirm:'Add {name} to the Administrators group?\n\nPrograms that need admin rights (e.g. a game launcher) will then only require a click on the UAC prompt instead of an admin password.\n\nNote: an existing session must be signed out and back in for this to take effect (Reset, then Login).',
+ granting:'Granting administrator rights…',
+ grantOk:'{name} is now in Administrators — Reset then Login to apply',
+ grantFail:'Grant failed: ',
+ delConfirm:'Delete user {name}? The account and its files will be removed.',
+ deleting:'Deleting {name} …',
+ deleted:'Deleted {name}',
+ delFail:'Delete failed: ',
+ saveCfgOkAdmin:'Saved: new users are granted administrator rights automatically',
+ saveCfgOkNormal:'Saved: new users are standard users (programs that need admin rights will ask for an admin password)',
+ saveCfgFail:'Failed to save settings: ',
+ fixConfirm:'OpenStreamMS has taken over the RDP graphics pipeline (the cause of the white screen after login).\n\nRepair restores the original Windows RDP protocol. Impact:\n· OpenStreamMS streaming will stop working (you can restore it with its installer at any time)\n· After repairing, click Login to verify; if the screen is still white, reboot once\n\nRepair now?',
+ fixing:'Restoring the RDP protocol…',
+ fixOk:'Restored. Click Login to test the screen; if it is still white, reboot the PC',
+ requestFail:'Request failed: ',
+ langBtn:'中文'
+}
+};
+let LANG='zh';
+function t(k,v){let s=(I18N[LANG]&&I18N[LANG][k])||I18N.zh[k]||k;if(v){for(const p in v){s=s.split('{'+p+'}').join(v[p])}}return s}
+function applyI18n(){
+document.documentElement.lang=(LANG==='zh'?'zh-CN':'en');
+document.title=t('title');
+document.getElementById('ttl').textContent=t('title');
+document.getElementById('sub').textContent=t('subtitle');
+document.getElementById('btnNew').textContent=t('btnNew');
+document.getElementById('btnFix').textContent=t('btnFix');
+document.getElementById('chkAdminText').textContent=t('chkAdmin');
+document.getElementById('btnLang').textContent=t('langBtn');
+}
 async function api(path,body){
 const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
 return await r.json();
 }
-function msg(t,cls){const m=document.getElementById('msg');m.textContent=t||'';m.className=cls||''}
-async function checkEnv(){
-try{
-const s=await (await fetch('/api/status')).json();
-if(!s.admin){const b=document.getElementById('banner');b.style.display='block';
-b.textContent='⚠ 当前没有管理员权限，创建/删除会失败。请以管理员身份重新运行本程序。'}
+function msg(t2,cls){const m=document.getElementById('msg');m.textContent=t2||'';m.className=cls||''}
+function applyStatus(s){
+const b=document.getElementById('banner');
+if(s&&s.admin===false){b.style.display='block';b.textContent=t('bannerNoAdmin')}else{b.style.display='none'}
 const fix=document.getElementById('btnFix');
-if(s.rdp_hijacked){fix.style.display='inline-block'}else{fix.style.display='none'}
-document.getElementById('chkAdmin').checked = !!s.admin_default;
-}catch(e){}
+if(s&&s.rdp_hijacked){fix.style.display='inline-block'}else{fix.style.display='none'}
+if(s){document.getElementById('chkAdmin').checked=!!s.admin_default}
 }
 async function saveCfg(){
 const on=document.getElementById('chkAdmin').checked;
 try{
 await api('config',{admin_default:on});
-msg(on?'已保存：新创建的用户会自动授予管理员权限':'已保存：新创建的用户为普通用户（启动需要管理员的程序时要输管理员密码）',on?'ok':'');
-}catch(e){msg('保存设置失败：'+e,'err')}
+msg(on?t('saveCfgOkAdmin'):t('saveCfgOkNormal'),on?'ok':'');
+}catch(e){msg(t('saveCfgFail')+e,'err')}
 }
 async function refresh(){
 const users=await (await fetch('/api/users')).json();
 const el=document.getElementById('list');
-if(!users.length){el.innerHTML='<div class="empty">还没有用户，点上面按钮创建一个</div>';return}
-el.innerHTML='<table><tr><th>用户</th><th>状态</th><th style="text-align:right">操作</th></tr>'+
+if(!users.length){el.innerHTML='<div class="empty">'+t('empty')+'</div>';return}
+el.innerHTML='<table><tr><th>'+t('thUser')+'</th><th>'+t('thStatus')+'</th><th style="text-align:right">'+t('thAct')+'</th></tr>'+
 users.map(u=>{
 if(u.pending){
-return `<tr><td>${u.name}</td><td><span class="tag disc" title="账号或文件没删干净，点右侧按钮继续清理">残留</span></td>
-<td><div class="acts"><button class="danger" onclick="del('${u.name}')">删除残留</button></div></td></tr>`;
+return '<tr><td>'+u.name+'</td><td><span class="tag disc" title="'+t('tagPendTitle')+'">'+t('pending')+'</span></td>'+
+'<td><div class="acts"><button class="danger" onclick="del(\''+u.name+'\')">'+t('delPending')+'</button></div></td></tr>';
 }
-return `<tr><td>${u.name}${u.admin?' <span class="tag adm" title="已在管理员组：UAC 弹窗只需点一下「是」，不用输密码">管理员</span>':''}</td><td><span class="tag ${u.online?'on':(u.connected?'disc':'off')}">${u.online?'在线':(u.connected?'已断开':'离线')}</span></td>
-<td><div class="acts"><button class="ghost" onclick="login('${u.name}')">登录</button>
-<button class="ghost" onclick="reset('${u.name}')">重置</button>
-${u.admin?'':`<button class="ghost" onclick="grant('${u.name}')">授予管理员</button>`}
-<button class="danger" onclick="del('${u.name}')">删除用户</button></div></td></tr>`;
+const st=u.online?t('online'):(u.connected?t('disconnected'):t('offline'));
+const admTag=u.admin?' <span class="tag adm" title="'+t('tagAdmTitle')+'">'+t('admin')+'</span>':'';
+const grantBtn=u.admin?'':'<button class="ghost" onclick="grant(\''+u.name+'\')">'+t('grant')+'</button>';
+return '<tr><td>'+u.name+admTag+'</td><td><span class="tag '+(u.online?'on':(u.connected?'disc':'off'))+'">'+st+'</span></td>'+
+'<td><div class="acts"><button class="ghost" onclick="login(\''+u.name+'\')">'+t('login')+'</button>'+
+'<button class="ghost" onclick="reset(\''+u.name+'\')">'+t('reset')+'</button>'+
+grantBtn+
+'<button class="danger" onclick="del(\''+u.name+'\')">'+t('del')+'</button></div></td></tr>';
 }).join('')+'</table>';
 }
 async function register(){
 const btn=document.getElementById('btnNew');btn.disabled=true;
-msg('正在创建…');
+msg(t('creating'));
 try{
 const r=await api('register',{admin:document.getElementById('chkAdmin').checked});
-if(r.ok)msg('已创建用户 '+r.user.name+(r.user.admin?'（管理员权限：启动需要管理员的程序只需点「是」）':'（普通用户：启动需要管理员的程序时要输密码）')+'，点「登录」即可进入','ok');
+if(r.ok)msg(t(r.user.admin?'createdAdmin':'createdNormal',{name:r.user.name}),'ok');
 else msg(r.error,'err');
-}catch(e){msg('请求失败：'+e,'err')}
+}catch(e){msg(t('requestFail')+e,'err')}
 btn.disabled=false;
 refresh();
 }
 async function login(name){
-msg('正在打开远程窗口…');
+msg(t('opening'));
 const r=await api('login',{name:name});
-msg(r.ok?'已发起登录，请留意弹出的远程窗口':'登录失败：'+r.error,r.ok?'ok':'err');
+msg(r.ok?t('loginOk'):t('loginFail')+r.error,r.ok?'ok':'err');
 setTimeout(refresh,1500);
 }
 async function reset(name){
-if(!confirm('重置会把 '+name+' 的会话注销（里面的程序会关闭），确认？'))return;
-msg('正在重置会话…');
+if(!confirm(t('resetConfirm',{name:name})))return;
+msg(t('resetting'));
 const r=await api('reset',{name:name});
-msg(r.ok?'会话已重置，现在点「登录」会进入全新桌面':'重置失败：'+r.error,r.ok?'ok':'err');
+msg(r.ok?t('resetOk'):t('resetFail')+r.error,r.ok?'ok':'err');
 refresh();
 }
 async function grant(name){
-if(!confirm('把 '+name+' 加入管理员组？\\n\\n之后它启动需要管理员权限的程序（比如游戏启动器）时，UAC 弹窗只需点一下「是」，不用再输管理员密码。\\n\\n注意：已经登录的会话要注销重登才生效（先点「重置」再点「登录」）。'))return;
-msg('正在授予管理员权限…');
+if(!confirm(t('grantConfirm',{name:name})))return;
+msg(t('granting'));
 const r=await api('grant',{name:name});
-msg(r.ok?(name+' 已加入管理员组，点「重置」再「登录」后生效'):('授予失败：'+r.error),r.ok?'ok':'err');
+msg(r.ok?t('grantOk',{name:name}):t('grantFail')+r.error,r.ok?'ok':'err');
 refresh();
 }
 async function del(name){
-if(!confirm('确定删除用户 '+name+' ？账号和文件都会清理掉。'))return;
-msg('正在删除 '+name+' …');
+if(!confirm(t('delConfirm',{name:name})))return;
+msg(t('deleting',{name:name}));
 const r=await api('delete',{name:name});
-msg(r.ok?('已删除 '+name+(r.error?'（'+r.error+'）':'')):'删除失败：'+r.error,r.ok?(r.error?'err':'ok'):'err');
+msg(r.ok?(t('deleted',{name:name})+(r.error?'（'+r.error+'）':'')):t('delFail')+r.error,r.ok?(r.error?'err':'ok'):'err');
 refresh();
 }
 async function fixRdp(){
-if(!confirm('检测到 OpenStreamMS 接管了 RDP 图形管线（登录后白屏的原因）。\\n\\n修复会把 RDP 协议还原为 Windows 原版，影响：\\n· 修复后 OpenStreamMS 的串流功能将不可用（可随时用它的安装脚本恢复）\\n· 修复完成后请点「登录」验证画面；如果仍白屏，重启一次电脑即可生效\\n\\n确认修复？'))return;
-msg('正在还原 RDP 协议…');
+if(!confirm(t('fixConfirm')))return;
+msg(t('fixing'));
 const r=await api('rdp_repair',{});
-if(r.ok){msg('已还原。现在点「登录」试试画面；如果还是白屏，重启电脑后即可生效','ok')}
+if(r.ok){msg(t('fixOk'),'ok')}
 else msg(r.error,'err');
 checkEnv();
 }
-checkEnv();refresh();setInterval(refresh,8000);
+async function checkEnv(){
+try{applyStatus(await (await fetch('/api/status')).json())}catch(e){}
+}
+async function toggleLang(){
+LANG=(LANG==='zh'?'en':'zh');
+applyI18n();
+try{await api('config',{lang:LANG})}catch(e){}
+await refresh();
+}
+(async function init(){
+try{
+const s=await (await fetch('/api/status')).json();
+if(s&&I18N[s.lang])LANG=s.lang;
+applyI18n();
+applyStatus(s);
+}catch(e){applyI18n()}
+await refresh();
+setInterval(refresh,8000);
+})();
 </script></body></html>"""
 
 class Handler(BaseHTTPRequestHandler):
@@ -765,7 +912,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(list_users())
         elif self.path == '/api/status':
             self._json({'admin': _is_admin(), 'rdp_hijacked': rdp_hijacked(),
-                        'admin_default': admin_default()})
+                        'admin_default': admin_default(), 'lang': _lang()})
         else:
             self.send_error(404)
 
@@ -774,13 +921,17 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length) or b'{}')
         except Exception:
-            return self._json({'ok': False, 'error': '请求格式错误'}, 400)
+            return self._json({'ok': False, 'error': _t('请求格式错误', 'Bad request')}, 400)
         p = self.path
         if p == '/api/register':
             user, err = register_user(body.get('name'), body.get('admin'))
         elif p == '/api/config':
-            self._json({'ok': True, 'admin_default': set_admin_default(body.get('admin_default'))})
-            self._json({'ok': not err, 'user': user, 'error': err})
+            # 同时接受 admin_default（新用户默认管理员）与 lang（界面语言）
+            if 'admin_default' in body:
+                set_admin_default(body.get('admin_default'))
+            if 'lang' in body:
+                set_lang(body.get('lang'))
+            self._json({'ok': True, 'admin_default': admin_default(), 'lang': _lang()})
         elif p == '/api/login':
             ok, err = login_user(body.get('name', ''))
             self._json({'ok': ok, 'error': err})
