@@ -285,7 +285,7 @@ def _freerdp_exe():
     """定位客户端：优先 sdl3-freerdp（画面渲染正常），再 wfreerdp。"""
     dirs = (os.path.join(BASE_DIR, 'FreeRDP'),
             os.path.join(HERE, 'FreeRDP'),
-            os.path.join(HERE, '..', '..', 'bin', 'FreeRDP'),   # 仓库 bin/ 目录
+            os.path.join(HERE, '..', '..', '3rd', 'FreeRDP'),   # 仓库 3rd/ 目录
             r'C:\Program Files\OpenStreamMS\FreeRDP')
     for name in ('sdl3-freerdp.exe', 'wfreerdp.exe'):
         for d in dirs:

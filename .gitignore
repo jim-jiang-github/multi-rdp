@@ -233,8 +233,8 @@ termwrap_backup.json
 *.exe
 
 # 预构建二进制是有意入库的（体积小、可直接使用）
-!3rd/TermWrap.dll
-!bin/**/*.exe
+!3rd/**/*.exe
+!3rd/**/*.dll
 
 # 本地工作区数据（AI 工作记录等）
 .workbuddy/

@@ -80,12 +80,11 @@ multi-rdp/
 │       ├── screencap.py     # pure-ctypes GDI screenshot helper
 │       ├── config.json      # UI config (admin_default / lang)
 │       └── users.json.example  # user DB template (real users.json is ignored)
-├── 3rd/
-│   └── TermWrap.dll         # multi-session patch (prebuilt 423 KB, ready to use)
-├── bin/                     # prebuilt tools (usable as-is, no build needed)
-│   ├── FreeRDP/             # sdl3-freerdp.exe / wfreerdp.exe + license
+├── 3rd/                     # prebuilt components (usable as-is, no build needed)
+│   ├── TermWrap.dll         # multi-session patch (423 KB)
 │   ├── patchtest.exe        # offline patch self-test (27 signature checks)
-│   └── patchlive.exe        # live patcher (patches TermService without reboot)
+│   ├── patchlive.exe        # live patcher (patches TermService without reboot)
+│   └── FreeRDP/             # sdl3-freerdp.exe / wfreerdp.exe + license
 ├── scripts/
 │   ├── run.bat              # double-click run/debug
 │   ├── build.bat            # package single exe
@@ -109,7 +108,7 @@ Two ways to enable it:
 | Mode | Action | Notes |
 | --- | --- | --- |
 | Persistent | `scripts\fix_termwrap.bat` | Points TermService `ServiceDll` at TermWrap.dll; effective after reboot. `rollback_termwrap.bat` reverts it |
-| Live patch | `bin\patchlive.exe` | Patches the running TermService process in memory — no reboot, no service restart |
+| Live patch | `3rd\patchlive.exe` | Patches the running TermService process in memory — no reboot, no service restart |
 
 Verify with `scripts/check_termwrap.ps1`: ServiceDll value, modules loaded by the TermService
 process, the `EnableConcurrentSessions` flag, and the current session list.
@@ -120,10 +119,10 @@ process, the `EnableConcurrentSessions` flag, and the current session list.
 
 ## About FreeRDP
 
-`bin/FreeRDP/` ships prebuilt FreeRDP clients (`sdl3-freerdp.exe`, `wfreerdp.exe`, ~22 MB in
+`3rd/FreeRDP/` ships prebuilt FreeRDP clients (`sdl3-freerdp.exe`, `wfreerdp.exe`, ~22 MB in
 total) so the project works out of the box. The FreeRDP source tree is large and is not vendored
 here; build it yourself from <https://github.com/FreeRDP/FreeRDP> if needed. License:
-`bin/FreeRDP/LICENSE.txt`.
+`3rd/FreeRDP/LICENSE.txt`.
 
 ## Security notes
 

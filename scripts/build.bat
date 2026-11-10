@@ -29,7 +29,7 @@ echo ==== BUILD OK ====
 echo Output: dist\MultiRDP.exe
 echo.
 echo 接下来（首次使用）:
-echo   1. 把仓库 bin\FreeRDP\ 目录复制到 dist\FreeRDP\ （FreeRDP 客户端）
+echo   1. 把仓库 3rd\FreeRDP\ 目录复制到 dist\FreeRDP\ （FreeRDP 客户端）
 echo   2. 双击 dist\MultiRDP.exe（会自动请求管理员权限），程序驻留托盘
 echo   3. 托盘右键菜单 -^> 打开 Web UI
 pause

@@ -72,12 +72,11 @@ multi-rdp/
 │       ├── screencap.py     # 纯 ctypes GDI 截屏小工具
 │       ├── config.json      # 界面配置（admin_default / lang）
 │       └── users.json.example  # 用户库模板（真实 users.json 不入库）
-├── 3rd/
-│   └── TermWrap.dll         # 多会话补丁（预编译 423 KB，直接可用）
-├── bin/                     # 预编译工具（直接可用，无需本地编译）
-│   ├── FreeRDP/             # sdl3-freerdp.exe / wfreerdp.exe + 许可证
+├── 3rd/                     # 预编译组件（直接可用，无需本地编译）
+│   ├── TermWrap.dll         # 多会话补丁（423 KB）
 │   ├── patchtest.exe        # 离线补丁自检（27 特征码验证）
-│   └── patchlive.exe        # 活体补丁器（不重启给 TermService 打补丁）
+│   ├── patchlive.exe        # 活体补丁器（不重启给 TermService 打补丁）
+│   └── FreeRDP/             # sdl3-freerdp.exe / wfreerdp.exe + 许可证
 ├── scripts/
 │   ├── run.bat              # 双击运行/调试
 │   ├── build.bat            # 打包单 exe
@@ -101,7 +100,7 @@ Windows 客户端版默认只允许一个远程会话。`TermWrap.dll` 通过运
 | 方式 | 操作 | 特点 |
 | --- | --- | --- |
 | 持久化 | `scripts\fix_termwrap.bat` | 把 TermService 的 `ServiceDll` 指向 TermWrap.dll，重启后自动生效；`rollback_termwrap.bat` 可回滚 |
-| 活体补丁 | `bin\patchlive.exe` | 不重启、不停服务，直接给运行中的 TermService 进程内存打补丁 |
+| 活体补丁 | `3rd\patchlive.exe` | 不重启、不停服务，直接给运行中的 TermService 进程内存打补丁 |
 
 安装后可用 `scripts/check_termwrap.ps1` 检查：ServiceDll 值、TermService 进程加载的模块、
 `EnableConcurrentSessions` 开关以及当前会话列表。
@@ -111,9 +110,9 @@ Windows 客户端版默认只允许一个远程会话。`TermWrap.dll` 通过运
 
 ## 关于 FreeRDP
 
-`bin/FreeRDP/` 里是预编译的 FreeRDP 客户端（`sdl3-freerdp.exe`、`wfreerdp.exe`，共约 22 MB），
+`3rd/FreeRDP/` 里是预编译的 FreeRDP 客户端（`sdl3-freerdp.exe`、`wfreerdp.exe`，共约 22 MB），
 直接随仓库分发、开箱即用。FreeRDP 源码体积较大，不在此仓库中；如需自行构建，见
-<https://github.com/FreeRDP/FreeRDP>。许可证见 `bin/FreeRDP/LICENSE.txt`。
+<https://github.com/FreeRDP/FreeRDP>。许可证见 `3rd/FreeRDP/LICENSE.txt`。
 
 ## 安全提示
 
