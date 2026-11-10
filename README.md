@@ -20,7 +20,8 @@
 - **一键创建用户**：随机用户名（`p` + 6 位，避开易混字符）、14 位强密码，自动加入
   `Remote Desktop Users`，可选加入 `Administrators`（UAC 只需点「是」）
 - **一键登录**：调用 FreeRDP 连接 `127.0.0.1`，每个用户一个独立窗口；
-  自动选择渲染正常的 `sdl3-freerdp.exe`，回退 `wfreerdp.exe` / `mstsc`
+  自动选择渲染正常的 `sdl3-freerdp.exe`，回退 `wfreerdp.exe` / `mstsc`；
+  分辨率可设置（自动跟随本机屏幕 / 全屏 / 从显示器支持的模式里选）
 - **会话重置**：注销该用户会话，解决黑屏/卡死；重置后重新登录即全新桌面
 - **彻底删除用户**：注销会话 → 删除账号 → WMI 删用户配置 → 强删残留目录 →
   清理 `ProfileList` 注册表 → 校验结果；删不干净会保留条目并标记「残留」，可重试
@@ -70,7 +71,7 @@ multi-rdp/
 │   └── webui/
 │       ├── server.py        # Web UI + 用户管理核心（127.0.0.1:8123）
 │       ├── screencap.py     # 纯 ctypes GDI 截屏小工具
-│       ├── config.json      # 界面配置（admin_default / lang）
+│       ├── config.json      # 界面配置（admin_default / lang / resolution）
 │       └── users.json.example  # 用户库模板（真实 users.json 不入库）
 ├── 3rd/                     # 预编译组件（直接可用，无需本地编译）
 │   ├── TermWrap.dll         # 多会话补丁（423 KB）

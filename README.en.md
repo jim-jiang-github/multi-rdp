@@ -23,7 +23,9 @@ colleagues their own desktop, and so on.
   14-char strong password, automatically added to `Remote Desktop Users`, optionally to
   `Administrators` (so UAC only needs a click instead of a password)
 - **One-click login** — launches FreeRDP against `127.0.0.1`, one window per user; prefers
-  `sdl3-freerdp.exe` (correct rendering) and falls back to `wfreerdp.exe` / `mstsc`
+  `sdl3-freerdp.exe` (correct rendering) and falls back to `wfreerdp.exe` / `mstsc`;
+  resolution is configurable (auto-match this screen / fullscreen / pick from the
+  display's supported modes)
 - **Session reset** — logs the user's session off to recover from a black/frozen screen; the
   next login starts a fresh desktop
 - **Clean user deletion** — logoff → delete account → delete profile via WMI → force-remove
@@ -78,7 +80,7 @@ multi-rdp/
 │   └── webui/
 │       ├── server.py        # web UI + user management core (127.0.0.1:8123)
 │       ├── screencap.py     # pure-ctypes GDI screenshot helper
-│       ├── config.json      # UI config (admin_default / lang)
+│       ├── config.json      # UI config (admin_default / lang / resolution)
 │       └── users.json.example  # user DB template (real users.json is ignored)
 ├── 3rd/                     # prebuilt components (usable as-is, no build needed)
 │   ├── TermWrap.dll         # multi-session patch (423 KB)

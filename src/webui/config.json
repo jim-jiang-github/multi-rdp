@@ -1,3 +1,4 @@
 {
-  "admin_default": true
+  "admin_default": true,
+  "resolution": "auto"
 }

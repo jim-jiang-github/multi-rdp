@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """简易用户管理 Web UI：注册 / 登录(RDP) / 删除。仅监听 127.0.0.1。"""
-import json, os, random, re, shutil, string, subprocess, sys, threading, time, webbrowser
+import ctypes, json, os, random, re, shutil, string, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8123
@@ -122,6 +122,100 @@ def set_admin_default(on):
     cfg['admin_default'] = bool(on)
     _save_cfg(cfg)
     return cfg['admin_default']
+
+# 远程桌面分辨率：auto = 跟随主显示器，fullscreen = 全屏，其余为 WxH 固定值
+_RES_RE = re.compile(r'^\d{2,5}x\d{2,5}$')
+
+def _valid_res(v):
+    return v in ('auto', 'fullscreen') or bool(_RES_RE.match(v or ''))
+
+def resolution():
+    v = _load_cfg().get('resolution', 'auto')
+    return v if _valid_res(v) else 'auto'
+
+def set_resolution(v):
+    if not _valid_res(v):
+        return resolution()
+    cfg = _load_cfg()
+    cfg['resolution'] = v
+    _save_cfg(cfg)
+    return cfg['resolution']
+
+class _DEVMODEW(ctypes.Structure):
+    _fields_ = [
+        ('dmDeviceName', ctypes.c_wchar * 32),
+        ('dmSpecVersion', ctypes.c_ushort),
+        ('dmDriverVersion', ctypes.c_ushort),
+        ('dmSize', ctypes.c_ushort),
+        ('dmDriverExtra', ctypes.c_ushort),
+        ('dmFields', ctypes.c_uint),
+        ('dmPositionX', ctypes.c_int),
+        ('dmPositionY', ctypes.c_int),
+        ('dmDisplayOrientation', ctypes.c_uint),
+        ('dmDisplayFixedOutput', ctypes.c_uint),
+        ('dmColor', ctypes.c_short),
+        ('dmDuplex', ctypes.c_short),
+        ('dmYResolution', ctypes.c_short),
+        ('dmTTOption', ctypes.c_short),
+        ('dmCollate', ctypes.c_short),
+        ('dmFormName', ctypes.c_wchar * 32),
+        ('dmLogPixels', ctypes.c_ushort),
+        ('dmBitsPerPel', ctypes.c_uint),
+        ('dmPelsWidth', ctypes.c_uint),
+        ('dmPelsHeight', ctypes.c_uint),
+        ('dmDisplayFlags', ctypes.c_uint),
+        ('dmDisplayFrequency', ctypes.c_uint),
+    ]
+
+def _screen_size():
+    """主显示器的当前物理分辨率（不受系统缩放比例虚拟化影响）。"""
+    try:
+        dm = _DEVMODEW()
+        dm.dmSize = ctypes.sizeof(_DEVMODEW)
+        # ENUM_CURRENT_SETTINGS = -1
+        if ctypes.windll.user32.EnumDisplaySettingsW(None, -1, ctypes.byref(dm)):
+            return dm.dmPelsWidth, dm.dmPelsHeight
+    except Exception:
+        pass
+    try:
+        u = ctypes.windll.user32
+        try:
+            u.SetProcessDPIAware()
+        except Exception:
+            pass
+        return u.GetSystemMetrics(0), u.GetSystemMetrics(1)
+    except Exception:
+        return 0, 0
+
+def _available_resolutions():
+    """枚举显示器支持的所有显示模式，按像素数从大到小去重返回 'WxH' 列表。"""
+    try:
+        dm = _DEVMODEW()
+        dm.dmSize = ctypes.sizeof(_DEVMODEW)
+        modes = set()
+        i = 0
+        while ctypes.windll.user32.EnumDisplaySettingsW(None, i, ctypes.byref(dm)):
+            if dm.dmPelsWidth >= 640 and dm.dmPelsHeight >= 480:
+                modes.add('%dx%d' % (dm.dmPelsWidth, dm.dmPelsHeight))
+            i += 1
+        return sorted(modes,
+                      key=lambda s: int(s.split('x')[0]) * int(s.split('x')[1]),
+                      reverse=True)
+    except Exception:
+        return []
+
+def _rdp_geometry():
+    """按配置算出 FreeRDP 的 /w /h（fullscreen 模式不需要）。"""
+    res = resolution()
+    if res == 'fullscreen':
+        return None, None
+    if res == 'auto':
+        w, h = _screen_size()
+        if w and h:
+            return w, h
+        return 1280, 800          # 探测失败时的兜底
+    w, h = res.split('x')
+    return int(w), int(h)
 
 def _all_local_users():
     rc, out = _run(['net', 'user'])
@@ -313,11 +407,16 @@ def login_user(name):
     if exe:
         # mstsc 连本机回环会立刻断开会话（reason code 17）；旧的 wfreerdp 画面全黑，
         # 只有 sdl3-freerdp 能正常渲染，所以按优先级选客户端。
+        w, h = _rdp_geometry()
         args = [exe, '/v:127.0.0.1', '/u:' + info['name'],
                 '/d:' + os.environ.get('COMPUTERNAME', '.'),
                 '/p:' + pwd, '/cert:ignore',
-                '/w:1280', '/h:800', '/bpp:32', '/network:lan',
+                '/bpp:32', '/network:lan',
                 '/audio-mode:redirect', '/log-level:ERROR']
+        if w and h:
+            args += ['/w:%d' % w, '/h:%d' % h]
+        else:
+            args += ['/f']        # 全屏模式
         try:
             logf = open(os.path.join(BASE_DIR, 'client.log'), 'ab')
             proc = subprocess.Popen(
@@ -334,8 +433,10 @@ def login_user(name):
     # 兜底：没有 wfreerdp 就用 mstsc
     _run(['cmdkey', '/generic:TERMSRV/127.0.0.2', '/user:' + info['name'],
           '/pass:' + pwd])
+    w, h = _rdp_geometry()
+    geom = ['/w:%d' % w, '/h:%d' % h] if (w and h) else ['/f']
     try:
-        subprocess.Popen(['mstsc', '/v:127.0.0.2', '/w:1280', '/h:800'],
+        subprocess.Popen(['mstsc', '/v:127.0.0.2'] + geom,
                          creationflags=subprocess.CREATE_NO_WINDOW)
     except Exception as e:
         return False, _t('启动远程窗口失败: ', 'Failed to launch remote window: ') + str(e)
@@ -681,6 +782,12 @@ tr:last-child td{border-bottom:none}
 </div>
 <label class="chk" title="勾选后新账号加入管理员组：启动需要管理员的程序（如游戏启动器）时 UAC 只需点「是」，不用输管理员密码">
 <input type="checkbox" id="chkAdmin" onchange="saveCfg()"><span id="chkAdminText">新用户授予管理员权限（启动需要管理员的程序时不用输密码）</span></label>
+<div class="chk"><span id="resLabel">远程桌面分辨率</span>：
+<select id="resSel" onchange="saveRes()">
+<option value="auto" id="resAuto">跟随本机屏幕</option>
+<option value="fullscreen" id="resFull">全屏（无窗口边框）</option>
+<!-- 显示器支持的固定分辨率由 /api/status 动态填充 -->
+</select></div>
 <div id="list"></div>
 <div id="msg"></div>
 </div>
@@ -727,6 +834,9 @@ zh:{
  requestFail:'请求失败：',
  netErr:'连不上后台服务（服务可能已退出，请重启程序）',
  badResp:'后台返回了无法解析的内容',
+ resLabel:'远程桌面分辨率',
+ resAuto:'跟随本机屏幕',
+ resFull:'全屏（无窗口边框）',
  langBtn:'English'
 },
 en:{
@@ -769,6 +879,9 @@ en:{
  requestFail:'Request failed: ',
  netErr:'Cannot reach the backend (it may have exited - restart the app)',
  badResp:'Backend returned an unreadable response',
+ resLabel:'Remote desktop resolution',
+ resAuto:'Match this screen',
+ resFull:'Fullscreen (borderless)',
  langBtn:'中文'
 }
 };
@@ -782,6 +895,9 @@ document.getElementById('sub').textContent=t('subtitle');
 document.getElementById('btnNew').textContent=t('btnNew');
 document.getElementById('btnFix').textContent=t('btnFix');
 document.getElementById('chkAdminText').textContent=t('chkAdmin');
+document.getElementById('resLabel').textContent=t('resLabel');
+document.getElementById('resAuto').textContent=t('resAuto');
+document.getElementById('resFull').textContent=t('resFull');
 document.getElementById('btnLang').textContent=t('langBtn');
 }
 async function api(path,body){
@@ -798,7 +914,16 @@ const b=document.getElementById('banner');
 if(s&&s.admin===false){b.style.display='block';b.textContent=t('bannerNoAdmin')}else{b.style.display='none'}
 const fix=document.getElementById('btnFix');
 if(s&&s.rdp_hijacked){fix.style.display='inline-block'}else{fix.style.display='none'}
-if(s){document.getElementById('chkAdmin').checked=!!s.admin_default}
+if(s){document.getElementById('chkAdmin').checked=!!s.admin_default;
+const rs=document.getElementById('resSel');
+if(Array.isArray(s.modes)&&s.modes.length){
+for(const o of [...rs.options])if(/^\d+x\d+$/.test(o.value))o.remove();
+for(const m of s.modes){
+if(![...rs.options].some(o=>o.value===m)){
+const op=document.createElement('option');op.value=m;op.textContent=m.replace('x',' \u00d7 ');rs.appendChild(op);
+}}
+}
+if(s.resolution)rs.value=s.resolution;}
 }
 async function saveCfg(){
 const on=document.getElementById('chkAdmin').checked;
@@ -806,6 +931,9 @@ try{
 await api('config',{admin_default:on});
 msg(on?t('saveCfgOkAdmin'):t('saveCfgOkNormal'),on?'ok':'');
 }catch(e){msg(t('saveCfgFail')+e,'err')}
+}
+async function saveRes(){
+try{await api('config',{resolution:document.getElementById('resSel').value})}catch(e){}
 }
 async function refresh(){
 let users;
@@ -928,7 +1056,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(list_users())
         elif self.path == '/api/status':
             self._json({'admin': _is_admin(), 'rdp_hijacked': rdp_hijacked(),
-                        'admin_default': admin_default(), 'lang': _lang()})
+                        'admin_default': admin_default(), 'lang': _lang(),
+                        'resolution': resolution(),
+                        'modes': _available_resolutions()})
         else:
             self.send_error(404)
 
@@ -957,12 +1087,16 @@ class Handler(BaseHTTPRequestHandler):
             user, err = register_user(body.get('name'), body.get('admin'))
             self._json({'ok': not err, 'user': user, 'error': err})
         elif p == '/api/config':
-            # 同时接受 admin_default（新用户默认管理员）与 lang（界面语言）
+            # 同时接受 admin_default（新用户默认管理员）、lang（界面语言）与
+            # resolution（远程桌面分辨率）
             if 'admin_default' in body:
                 set_admin_default(body.get('admin_default'))
             if 'lang' in body:
                 set_lang(body.get('lang'))
-            self._json({'ok': True, 'admin_default': admin_default(), 'lang': _lang()})
+            if 'resolution' in body:
+                set_resolution(body.get('resolution'))
+            self._json({'ok': True, 'admin_default': admin_default(), 'lang': _lang(),
+                        'resolution': resolution()})
         elif p == '/api/login':
             ok, err = login_user(body.get('name', ''))
             self._json({'ok': ok, 'error': err})
