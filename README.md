@@ -82,9 +82,7 @@ multi-rdp/
 │   ├── build.bat            # 打包单 exe
 │   ├── fix_termwrap.bat     # 设置 ServiceDll 持久化（重启后自动生效）
 │   ├── rollback_termwrap.bat# 回滚 ServiceDll 到原值
-│   ├── check_termwrap.ps1   # 检查 TermWrap 加载状态与并发会话开关
-│   ├── grant_admin.*        # 给现有远程用户批量补管理员权限
-│   └── remove_profile.bat   # 强制删除残留用户目录
+│   └── check_termwrap.ps1   # 检查 TermWrap 加载状态与并发会话开关
 └── docs/                    # 截图等文档资源
 ```
 

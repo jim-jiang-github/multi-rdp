@@ -90,9 +90,7 @@ multi-rdp/
 │   ├── build.bat            # package single exe
 │   ├── fix_termwrap.bat     # persist ServiceDll (effective after reboot)
 │   ├── rollback_termwrap.bat# restore the original ServiceDll
-│   ├── check_termwrap.ps1   # check TermWrap load state / concurrent sessions flag
-│   ├── grant_admin.*        # bulk-grant admin rights to existing remote users
-│   └── remove_profile.bat   # force-remove a leftover profile folder
+│   └── check_termwrap.ps1   # check TermWrap load state / concurrent sessions flag
 └── docs/                    # screenshots and docs assets
 ```
 
