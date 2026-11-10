@@ -214,18 +214,38 @@ def _common_resolutions(modes):
     """常用分辨率里去掉本机已枚举到的，避免下拉框重复。"""
     return [m for m in COMMON_RES if m not in modes]
 
+def _window_fit_limits():
+    """窗口化尺寸上限：留出标题栏/任务栏和一圈边距，保证窗口可拖动、看得出是窗口。"""
+    sw, sh = _screen_size()
+    if not sw or not sh:
+        return 0, 0
+    return max(800, sw - 100), max(600, sh - 140)
+
 def _rdp_geometry():
-    """按配置算出 FreeRDP 的 /w /h（fullscreen 模式不需要）。"""
+    """按配置算出 FreeRDP 的 /w /h（fullscreen 模式不需要）。
+
+    一律按「窗口化」处理：auto 从常用档位里挑能完整放进屏幕的最大尺寸
+    （1080p 屏上是 1600x900），手动选的尺寸塞不进屏幕就等比缩小——
+    尺寸正好等于屏幕大小的窗口会被 Windows 顶成最大化，看起来就是全屏。
+    """
     res = resolution()
     if res == 'fullscreen':
         return None, None
+    max_w, max_h = _window_fit_limits()
     if res == 'auto':
-        w, h = _screen_size()
-        if w and h:
-            return w, h
+        if max_w and max_h:
+            for m in COMMON_RES:
+                w, h = map(int, m.split('x'))
+                if w <= max_w and h <= max_h:
+                    return w, h
+            return max_w // 4 * 4, max_h // 4 * 4   # 小屏：没有合适的常用档就按可用区域来
         return 1280, 800          # 探测失败时的兜底
     w, h = res.split('x')
-    return int(w), int(h)
+    w, h = int(w), int(h)
+    if max_w and max_h and (w > max_w or h > max_h):
+        ratio = min(max_w / w, max_h / h)
+        w, h = int(w * ratio) // 4 * 4, int(h * ratio) // 4 * 4
+    return w, h
 
 def _all_local_users():
     rc, out = _run(['net', 'user'])
@@ -1561,7 +1581,7 @@ zh:{
  netErr:'连不上后台服务（服务可能已退出，请重启程序）',
  badResp:'后台返回了无法解析的内容',
  resLabel:'远程桌面分辨率',
- resAuto:'跟随本机屏幕',
+ resAuto:'自动（窗口化·挑合适尺寸）',
  resFull:'全屏（无窗口边框）',
  grpNative:'本机支持',
  grpCommon:'常用分辨率',
@@ -1625,7 +1645,7 @@ en:{
  netErr:'Cannot reach the backend (it may have exited - restart the app)',
  badResp:'Backend returned an unreadable response',
  resLabel:'Remote desktop resolution',
- resAuto:'Match this screen',
+ resAuto:'Auto (windowed, best fit)',
  resFull:'Fullscreen (borderless)',
  grpNative:'Supported by this display',
  grpCommon:'Common resolutions',

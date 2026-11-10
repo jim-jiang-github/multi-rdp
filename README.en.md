@@ -27,8 +27,9 @@ colleagues their own desktop, and so on.
   process and has no foreground rights, so without this it stays behind other windows); clicking
   Login for a user that is already running simply brings that window to the front. Prefers
   `sdl3-freerdp.exe` (correct rendering) and falls back to `wfreerdp.exe` / `mstsc`;
-  resolution is configurable (auto-match this screen / fullscreen / pick from the
-  display's supported modes)
+  resolution is configurable: "auto" opens windowed at the largest common size that
+  fits on the screen (1600x900 on a 1080p display); a manually picked size that does
+  not fit is scaled down proportionally; only picking "fullscreen" goes fullscreen)
 - **Hide instead of disconnect** — "Hide window" only hides the client window; the RDP
   connection stays up, so the session remains `Active`: programs keep rendering and keep their
   focus, while the window disappears from the taskbar and Alt+Tab. "Show window" brings it back
