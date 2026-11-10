@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Continue'
+﻿$ErrorActionPreference = 'Continue'
 # users.json 在仓库内 src/webui 下（相对本脚本定位，不再硬编码绝对路径）
 $json = Join-Path $PSScriptRoot '..\src\webui\users.json'
 $log  = 'C:\Users\Public\grant_admin_result.txt'

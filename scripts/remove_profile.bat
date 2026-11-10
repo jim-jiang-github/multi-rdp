@@ -1,7 +1,6 @@
 @echo off
-chcp 65001 >nul
-REM 强制删除残留的用户配置目录（takeown + icacls + rd）
-REM 用法: remove_profile.bat <用户名>   例如: remove_profile.bat pq68b2w
+REM Force-remove a leftover user profile folder (takeown + icacls + rd)
+REM Usage: remove_profile.bat ^<username^>    e.g. remove_profile.bat pq68b2w
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo Requesting administrator permission...

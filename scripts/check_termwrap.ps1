@@ -1,4 +1,4 @@
-$log = 'C:\Users\Public\termwrap_status.txt'
+﻿$log = 'C:\Users\Public\termwrap_status.txt'
 $r = New-Object System.Collections.ArrayList
 function Say($t) { [void]$r.Add($t) }
 

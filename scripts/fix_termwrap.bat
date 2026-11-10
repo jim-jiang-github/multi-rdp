@@ -1,5 +1,6 @@
 @echo off
-REM Self-elevating: point TermService ServiceDll back to TermWrap.dll
+REM Self-elevating: point TermService ServiceDll to TermWrap.dll (copied from 3rd\ if missing)
+REM NOTE: keep this file pure ASCII + CRLF. cmd.exe misparses UTF-8 Chinese text.
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo Requesting administrator permission...

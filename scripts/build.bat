@@ -1,7 +1,8 @@
 @echo off
-REM ==== MultiRDP 打包脚本：把 Web UI + 托盘程序打包成单个 exe ====
-REM 产物: dist\MultiRDP.exe （托盘常驻，菜单：打开 Web UI / 设置 / 退出）
-REM 运行时数据（users.json / config.json）和 FreeRDP 客户端放在 exe 同目录。
+REM ==== MultiRDP build script: package the web UI + tray app into one exe ====
+REM Output: dist\MultiRDP.exe (tray resident; menu: Open Web UI / Settings / Exit)
+REM Runtime data (users.json, config.json) and the FreeRDP client live next to the exe.
+REM NOTE: keep this file pure ASCII + CRLF. cmd.exe misparses UTF-8 Chinese text.
 cd /d "%~dp0.."
 
 where python >nul 2>&1
@@ -28,8 +29,8 @@ echo.
 echo ==== BUILD OK ====
 echo Output: dist\MultiRDP.exe
 echo.
-echo 接下来（首次使用）:
-echo   1. 把仓库 3rd\FreeRDP\ 目录复制到 dist\FreeRDP\ （FreeRDP 客户端）
-echo   2. 双击 dist\MultiRDP.exe（会自动请求管理员权限），程序驻留托盘
-echo   3. 托盘右键菜单 -^> 打开 Web UI
+echo First run:
+echo   1. copy the repo folder 3rd\FreeRDP  to  dist\FreeRDP  (FreeRDP client)
+echo   2. double-click dist\MultiRDP.exe  (it asks for admin rights, then stays in tray)
+echo   3. tray menu: Open Web UI
 pause

@@ -1,0 +1,21 @@
+* text=auto
+
+# 本文件自身固定 LF
+.gitattributes text eol=lf
+
+# cmd.exe 只接受 CRLF 换行，否则整段批处理会被拆碎执行（务必保持）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Windows PowerShell 5.1 需要 BOM 才能正确读取中文（文件本身另存为 UTF-8 with BOM）
+*.ps1 text eol=crlf
+
+# Shell 脚本必须是 LF，CRLF 会导致 /bin/bash^M 报错
+*.sh text eol=lf
+
+# 二进制文件不做换行转换
+*.dll binary
+*.exe binary
+*.png binary
+*.zip binary
+*.gz binary

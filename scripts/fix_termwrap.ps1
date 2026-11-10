@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $log = 'C:\Users\Public\fix_termwrap_result.txt'
 $out = New-Object System.Collections.ArrayList
 function Say($t) { [void]$out.Add($t); Write-Host $t }

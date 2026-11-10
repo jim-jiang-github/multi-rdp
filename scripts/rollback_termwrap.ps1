@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 # 从 fix_termwrap.ps1 写出的备份文件恢复原始 ServiceDll
 $log = 'C:\Users\Public\rollback_termwrap_result.txt'
 $out = New-Object System.Collections.ArrayList
