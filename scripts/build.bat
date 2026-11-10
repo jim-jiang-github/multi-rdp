@@ -21,6 +21,13 @@ if errorlevel 1 (
     pause & exit /b 1
 )
 
+REM A running MultiRDP.exe locks dist\MultiRDP.exe and a running remote window locks
+REM dist\FreeRDP\sdl3-freerdp.exe. Warn early instead of failing halfway through.
+tasklist /fi "imagename eq MultiRDP.exe" 2>nul | find /i "MultiRDP.exe" >nul
+if not errorlevel 1 (
+    echo [WARN] MultiRDP.exe is running - exit it from the tray first, or the build may fail.
+)
+
 echo [2/3] Building dist\MultiRDP.exe ...
 python -m PyInstaller --noconfirm --clean --onefile --noconsole --workpath .build --paths src --hidden-import webui.server --name MultiRDP src\tray_app.py
 if errorlevel 1 (
@@ -33,10 +40,25 @@ if not exist "3rd\FreeRDP\sdl3-freerdp.exe" (
     echo [WARN] 3rd\FreeRDP\sdl3-freerdp.exe not found - skipping client copy.
     goto done
 )
-xcopy "3rd\FreeRDP" "dist\FreeRDP" /E /I /Y /Q >nul
+REM A running remote window keeps dist\FreeRDP\sdl3-freerdp.exe open, and writing an
+REM open exe fails with a sharing violation. So compare first: when the client is
+REM already identical there is nothing to copy and the locked file is never touched.
+fc /b "3rd\FreeRDP\sdl3-freerdp.exe" "dist\FreeRDP\sdl3-freerdp.exe" >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] FreeRDP client already up to date in dist\FreeRDP - nothing to copy.
+    goto done
+)
+xcopy "3rd\FreeRDP" "dist\FreeRDP" /E /I /Y /Q >nul 2>&1
 if errorlevel 1 (
-    echo [FAIL] copying 3rd\FreeRDP to dist\FreeRDP failed.
-    pause & exit /b 1
+    REM Still identical after the failed copy? Then a running window had it open and
+    REM the existing copy is fine; only report FAIL when the files really differ.
+    fc /b "3rd\FreeRDP\sdl3-freerdp.exe" "dist\FreeRDP\sdl3-freerdp.exe" >nul 2>&1
+    if errorlevel 1 (
+        echo [FAIL] copying 3rd\FreeRDP to dist\FreeRDP failed.
+        echo        Close the remote windows / exit MultiRDP from the tray, then rebuild.
+        pause & exit /b 1
+    )
+    echo [WARN] FreeRDP client is in use by a running window - existing copy kept.
 )
 
 :done
