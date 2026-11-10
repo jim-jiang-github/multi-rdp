@@ -789,6 +789,14 @@ def _spawn_client(info, hidden=False):
         args += ['/w:%d' % w, '/h:%d' % h]
     else:
         args += ['/f']            # 全屏模式
+    # SDL 默认挑 GPU 加速的渲染后端。回环场景里客户端和远程会话共用同一块 GPU：
+    # 会话里跑游戏把 GPU 占满时，客户端的 present 会一直排队，主线程被卡住，
+    # 表现为窗口「未响应」（实测 CPU 空闲、8 个线程停在 EventPairLow）。
+    # 软件渲染把最后一步 blit 放到 CPU 上，彻底和 GPU 解耦，游戏再忙也饿不死窗口。
+    # 不想要就在 config.json 里写 "software_render": false。
+    env = os.environ.copy()
+    if _load_cfg().get('software_render', True):
+        env['SDL_RENDER_DRIVER'] = 'software'
     si = None
     if hidden:
         si = subprocess.STARTUPINFO()
@@ -797,7 +805,7 @@ def _spawn_client(info, hidden=False):
     logf = open(os.path.join(BASE_DIR, 'client.log'), 'ab')
     return subprocess.Popen(
         args, cwd=os.path.dirname(exe), stdout=logf, stderr=logf,
-        startupinfo=si,
+        startupinfo=si, env=env,
         creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
 
 
@@ -924,6 +932,7 @@ _crashes = {}          # key -> [退出时间...]，用来算重连退避
 
 _hung_state = {}       # key -> 连续判定无响应的次数
 _hung_restarts = {}    # key -> [重启时间...]，防误判造成反复重启
+_hung_pause_log = {}   # key -> 上次「暂停自动重启」日志时间（限频，别刷屏）
 _hung_started = False
 _hung_lock = threading.Lock()
 
@@ -958,6 +967,7 @@ def _watch_hung():
                     continue
                 if _responds(hwnd):
                     _hung_state.pop(key, None)
+                    _hung_pause_log.pop(key, None)
                     continue
                 _hung_state[key] = _hung_state.get(key, 0) + 1
                 if _hung_state[key] < 2:
@@ -966,8 +976,12 @@ def _watch_hung():
                 now = time.time()
                 recent = [t for t in _hung_restarts.get(key, []) if now - t < 120]
                 if len(recent) >= 2:
-                    _log('%s 反复无响应但重启无效（疑似误判或整机过载），暂停自动重启'
-                         % key)
+                    # 2 分钟内已重启过两次还卡：再重启没意义，先停手。
+                    # 只记一条日志，别每 4 秒刷一行把 client.log 灌满。
+                    if now - _hung_pause_log.get(key, 0) > 120:
+                        _hung_pause_log[key] = now
+                        _log('%s 反复无响应但重启无效（疑似会话内负载过重），暂停自动重启'
+                             % key)
                     _hung_restarts[key] = recent
                     continue
                 _hung_restarts[key] = recent + [now]

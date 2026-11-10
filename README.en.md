@@ -140,10 +140,18 @@ here; build it yourself from <https://github.com/FreeRDP/FreeRDP> if needed. Lic
 ### The client sometimes shows "(Not Responding)" or vanishes
 
 With a loopback connection (client and session on the same machine) plus heavy content in that
-session (games, video), `FreeRDP: 127.0.0.1 (Not Responding)` happens: the client's render/decode
-thread gets starved of GPU/CPU, and after more than 5 seconds without pumping messages Windows
-grays the window out as "not responding". If it stalls long enough, FreeRDP exits on a truncated
-fastpath bitmap update (`Fastpath update Bitmap failed, status 0` in `client.log`).
+session (games, video), `FreeRDP: 127.0.0.1 (Not Responding)` happens. In measurements the client
+was nearly idle on CPU - the real cause is that SDL picks a GPU-accelerated renderer while the
+client shares the GPU with the remote session: when a game inside the session saturates the GPU,
+the client's frame presentation queues up forever, the main thread stops pumping messages, and
+Windows grays the window out. If it stalls long enough, FreeRDP exits on a truncated fastpath
+bitmap update (`Fastpath update Bitmap failed, status 0` in `client.log`).
+
+For this reason the client now defaults to the **SDL software renderer**
+(`SDL_RENDER_DRIVER=software`, the final blit runs on the CPU), which decouples it from the GPU
+entirely. Set `"software_render": false` in `config.json` to go back to GPU rendering. Measured on
+the same machine at the same time: the client of an idle session stayed healthy while the client
+of the game session hung repeatedly - exactly this mechanism.
 
 What the manager does about it:
 

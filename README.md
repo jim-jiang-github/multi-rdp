@@ -125,9 +125,16 @@ Windows 客户端版默认只允许一个远程会话。`TermWrap.dll` 通过运
 ### 客户端偶尔「未响应」/ 窗口自己消失
 
 同机回环（客户端和它连的会话跑在同一台机器上）+ 会话里跑重画面（游戏、视频）时，
-`FreeRDP: 127.0.0.1 (Not Responding)` 是会出现的：客户端渲染/解码线程被抢不到 GPU/CPU，
-卡住超过 5 秒 Windows 就给窗口盖上「未响应」；卡太久时 FreeRDP 会因为收到半截的
-fastpath 位图更新直接退出（`client.log` 里是 `Fastpath update Bitmap failed, status 0`）。
+`FreeRDP: 127.0.0.1 (Not Responding)` 是会出现的：实测里客户端 CPU 基本空闲，卡住的原因是
+SDL 默认走 GPU 加速渲染，而客户端和远程会话共用同一块 GPU——会话里的游戏把 GPU 占满时，
+客户端的画面呈现一直在排队，主线程跟着被卡住，Windows 就给窗口盖上「未响应」；
+卡太久时 FreeRDP 还会因为收到半截的 fastpath 位图更新直接退出
+（`client.log` 里是 `Fastpath update Bitmap failed, status 0`）。
+
+因此客户端默认改用 **SDL 软件渲染**（`SDL_RENDER_DRIVER=software`，最后的 blit 走 CPU），
+彻底和 GPU 解耦，会话里跑游戏也饿不死客户端窗口。不想要这一行为，在 `config.json` 里写
+`"software_render": false` 恢复 GPU 渲染。实测同一时刻：空会话的客户端一直健康，
+游戏会话的客户端反复卡死、游戏一停就恢复，就是这个机理。
 
 程序对此的处理：
 
