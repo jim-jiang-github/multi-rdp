@@ -438,6 +438,8 @@ _kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
 _kernel32.QueryFullProcessImageNameW.argtypes = [
     ctypes.c_void_p, ctypes.c_ulong, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_ulong)]
 _kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+_kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+_kernel32.WaitForSingleObject.restype = ctypes.c_ulong
 
 
 def _keep_alive():
@@ -460,6 +462,43 @@ def _exe_of(pid):
         _kernel32.CloseHandle(h)
 
 
+def _log(msg):
+    """把窗口相关的动作记到 client.log，出问题时能直接看。"""
+    try:
+        with open(os.path.join(BASE_DIR, 'client.log'), 'a', encoding='utf-8') as f:
+            f.write('[%s] %s\n' % (time.strftime('%Y-%m-%d %H:%M:%S'), msg))
+    except OSError:
+        pass
+
+
+def _pid_running(pid):
+    """进程还活着吗（不依赖进程名，防被沙箱/过滤驱动返回假路径）。"""
+    h = _kernel32.OpenProcess(0x00100000, 0, pid)      # SYNCHRONIZE
+    if not h:
+        return False
+    try:
+        return _kernel32.WaitForSingleObject(h, 0) == 0x102   # WAIT_TIMEOUT
+    finally:
+        _kernel32.CloseHandle(h)
+
+
+def _looks_client(pid):
+    """这个 pid 是不是远程客户端：exe 名对上，或者窗口标题里带 FreeRDP。
+
+    标题这条路很重要：某些环境（安全软件、沙箱）下 QueryFullProcessImageNameW
+    会返回一个假路径，光看 exe 名会把真客户端判成别的程序。
+    """
+    if _exe_of(pid) in _CLIENT_EXES:
+        return True
+    try:
+        for _h, _p, t in _top_windows(pid):
+            if 'freerdp' in (t or '').lower():
+                return True
+    except Exception:
+        pass
+    return False
+
+
 # clients.json：把「哪个进程是哪个用户的远程窗口」「窗口是不是藏着」记在盘上。
 # 不然程序一重启，内存里的映射就没了：窗口明明还藏着（进程活着），界面却当成
 # 可见的，只能点「隐藏窗口」，再也点不回来。
@@ -475,14 +514,14 @@ def _pid_of(ent):
 
 
 def _alive(ent):
-    """客户端进程是否还活着（进程名必须是远程客户端，防 pid 复用认错人）。"""
+    """客户端进程是否还活着（窗口暂时不在也算活着，别把记录丢了）。"""
     if not ent:
         return False
     proc = ent.get('proc')
     if proc is not None:
         return proc.poll() is None
     pid = int(ent.get('pid') or 0)
-    return bool(pid) and _exe_of(pid) in _CLIENT_EXES
+    return bool(pid) and _pid_running(pid)
 
 
 def _save_clients():
@@ -513,11 +552,13 @@ def _adopt_clients():
         if key in _clients or not isinstance(info, dict):
             continue
         pid = int(info.get('pid') or 0)
-        if not pid or _exe_of(pid) not in _CLIENT_EXES:
+        if not pid or not _pid_running(pid) or not _looks_client(pid):
+            _log('adopt %s: pid %s 已失效，丢弃' % (key, pid))
             continue
         _clients[key] = {'proc': None, 'pid': pid, 'hwnd': 0,
                          'hidden': bool(info.get('hidden')),
                          'intent': '', 'auto': False, 't0': 0}
+        _log('adopt %s: 接管 pid %s（hidden=%s）' % (key, pid, info.get('hidden')))
     _save_clients()
 
 
@@ -575,12 +616,12 @@ def _client_window(name, key=None):
         return 0, pid
     low = name.lower()
     hit = [(h, p) for h, p, title in _top_windows()
-           if low in title.lower() and _exe_of(p) in _CLIENT_EXES]
+           if low in title.lower() and _looks_client(p)]
     if len(hit) == 1:
         return hit[0]
     if not hit:
         # 标题里认不出人：整机只有唯一一个远程客户端窗口时，就认它
-        allc = [(h, p) for h, p, _t in _top_windows() if _exe_of(p) in _CLIENT_EXES]
+        allc = [(h, p) for h, p, _t in _top_windows() if _looks_client(p)]
         if len(allc) == 1:
             return allc[0]
     return 0, 0
@@ -721,7 +762,7 @@ def _kill_client(key):
             pass
     else:
         pid = _pid_of(ent)          # 接管来的进程没有 Popen，只能按 pid 结束
-        if pid and _exe_of(pid) in _CLIENT_EXES:
+        if pid and _pid_running(pid):
             _run(['taskkill', '/PID', str(pid), '/T', '/F'])
     _save_clients()
 
@@ -1102,6 +1143,8 @@ def rdp_repair():
 
 def list_users():
     _ensure_adopted()
+    for k in [k for k, e in list(_clients.items()) if not _alive(e)]:
+        _clients.pop(k, None)          # 进程已经没了，别拿旧记录污染状态
     with _lock:
         db = _load()
         # 1) 远程用户组的成员拉进 db（imported，无密码）
@@ -1140,13 +1183,16 @@ def list_users():
     if waiting:
         known = {_pid_of(e) for e in _clients.values() if _alive(e)}
         free = [(h, p, bool(_user32.IsWindowVisible(h))) for h, p, _t in _top_windows()
-                if p not in known and _exe_of(p) in _CLIENT_EXES]
+                if p not in known and _looks_client(p)]
         if len(free) == 1 and len(waiting) == 1:
             h, p, vis = free[0]
             _clients[waiting[0].lower()] = {'proc': None, 'pid': p, 'hwnd': h,
                                             'hidden': not vis, 'intent': '',
                                             'auto': False, 't0': 0}
             _save_clients()
+            _log('认领 %s: pid %s hwnd %s 可见=%s' % (waiting[0], p, h, vis))
+        elif free:
+            _log('无法归属客户端窗口：待认领用户=%s，空闲窗口=%s' % (waiting, free))
 
     out = []
     for k, v in db.items():
