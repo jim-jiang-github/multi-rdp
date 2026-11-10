@@ -31,7 +31,8 @@ colleagues their own desktop, and so on.
   focus, while the window disappears from the taskbar and Alt+Tab. "Show window" brings it back
   unchanged. Clicking the window's X really does drop the connection (session becomes
   `Disc`, which has no input channel and no real focus); the tool then reconnects once in the
-  background to put the session back to `Active` (disable with `keep_alive: false` in
+  background to put the session back to `Active`, keeping the window's previous visibility
+  (visible stays visible, hidden stays hidden; disable with `keep_alive: false` in
   `config.json`). Only Reset signs the session out and ends those programs. Window ownership
   and the hidden flag are stored in `clients.json`, so after the manager restarts it re-adopts
   the existing windows and "Show window" still works
@@ -132,6 +133,41 @@ process, the `EnableConcurrentSessions` flag, and the current session list.
 total) so the project works out of the box. The FreeRDP source tree is large and is not vendored
 here; build it yourself from <https://github.com/FreeRDP/FreeRDP> if needed. License:
 `3rd/FreeRDP/LICENSE.txt`.
+
+### The client sometimes shows "(Not Responding)" or vanishes
+
+With a loopback connection (client and session on the same machine) plus heavy content in that
+session (games, video), `FreeRDP: 127.0.0.1 (Not Responding)` happens: the client's render/decode
+thread gets starved of GPU/CPU, and after more than 5 seconds without pumping messages Windows
+grays the window out as "not responding". If it stalls long enough, FreeRDP exits on a truncated
+fastpath bitmap update (`Fastpath update Bitmap failed, status 0` in `client.log`).
+
+What the manager does about it:
+
+- two consecutive unanswered pings (~8 s apart) mark the window as stuck; the client is ended and
+  reconnected with the same visibility (the session itself is untouched, you land back on the same
+  desktop). At most two restarts per user within two minutes, so a false positive cannot loop
+- when the client process exits on its own, the reconnect **preserves visibility**: a visible
+  window comes back visible and activated, a hidden one stays hidden; repeated crashes within five
+  minutes back off automatically
+- every action is logged to `client.log` ("无响应 / client exited / keep-alive")
+
+To reduce the root cause, pass extra client arguments from `config.json` (no rebuild needed):
+
+```json
+{
+  "client_args": "/gfx:AVC444"
+}
+```
+
+- `/gfx:AVC444` — H.264 graphics pipeline instead of fastpath bitmap updates (targets the crash
+  above, but uses more GPU)
+- `/bpp:16` — 16-bit color, halves decode work and bandwidth (lower quality)
+- `-compression` — disable bulk compression, saves server CPU (bandwidth is free on loopback)
+- `/network:wan` — server pushes frames at a narrowband pace: steadier, blurrier
+
+For gaming, the effective lever is resolution: keep it at 1280×720 or below and avoid keeping many
+client windows open.
 
 ## Security notes
 

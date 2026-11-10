@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """简易用户管理 Web UI：注册 / 登录(RDP) / 删除。仅监听 127.0.0.1。"""
-import atexit, ctypes, json, os, random, re, shutil, string, subprocess, sys, threading, time, webbrowser
+import atexit, ctypes, json, os, random, re, shlex, shutil, string, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8123
@@ -440,6 +440,14 @@ _kernel32.QueryFullProcessImageNameW.argtypes = [
 _kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
 _kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
 _kernel32.WaitForSingleObject.restype = ctypes.c_ulong
+_user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+# 探活：往窗口发一个 WM_NULL，带 SMTO_ABORTIFHUNG —— 目标线程卡住（也就是系统
+# 显示「未响应」的那个状态）时立刻返回 0，不用真的等超时。
+SMTO_BLOCK, SMTO_ABORTIFHUNG, WM_NULL = 0x0001, 0x0002, 0x0000
+_user32.SendMessageTimeoutW.argtypes = [
+    ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_size_t,
+    ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(ctypes.c_size_t)]
+_user32.SendMessageTimeoutW.restype = ctypes.c_void_p
 
 
 def _keep_alive():
@@ -447,19 +455,41 @@ def _keep_alive():
     return bool(_load_cfg().get('keep_alive', True))
 
 
+_exe_cache = {}      # pid -> (exe 名, 取的时间)，状态接口每 2s 轮询一次，别每次都去查进程
+
+
 def _exe_of(pid):
     """进程 exe 名（小写），失败返回空串。"""
+    now = time.time()
+    hit = _exe_cache.get(pid)
+    if hit and now - hit[1] < 20:
+        return hit[0]
+    name = ''
     h = _kernel32.OpenProcess(0x1000, 0, pid)    # PROCESS_QUERY_LIMITED_INFORMATION
-    if not h:
-        return ''
-    try:
-        n = ctypes.c_ulong(1024)
-        buf = ctypes.create_unicode_buffer(1024)
-        if _kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
-            return os.path.basename(buf.value).lower()
-        return ''
-    finally:
-        _kernel32.CloseHandle(h)
+    if h:
+        try:
+            n = ctypes.c_ulong(1024)
+            buf = ctypes.create_unicode_buffer(1024)
+            if _kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+                name = os.path.basename(buf.value).lower()
+        finally:
+            _kernel32.CloseHandle(h)
+    if len(_exe_cache) > 400:                    # 别无限长
+        for k in [k for k, v in _exe_cache.items() if now - v[1] > 60]:
+            _exe_cache.pop(k, None)
+    _exe_cache[pid] = (name, now)
+    return name
+
+
+def _responds(hwnd, timeout=1200):
+    """窗口的 UI 线程还在处理消息吗（系统显示「未响应」时为 False）。"""
+    if not hwnd:
+        return True
+    res = ctypes.c_size_t(0)
+    r = _user32.SendMessageTimeoutW(hwnd, WM_NULL, 0, 0,
+                                    SMTO_BLOCK | SMTO_ABORTIFHUNG, timeout,
+                                    ctypes.byref(res))
+    return bool(r)
 
 
 def _log(msg):
@@ -482,21 +512,30 @@ def _pid_running(pid):
         _kernel32.CloseHandle(h)
 
 
+_looks_cache = {}    # pid -> (是不是客户端, 时间)，枚举窗口挺贵的，别反复来
+
+
 def _looks_client(pid):
     """这个 pid 是不是远程客户端：exe 名对上，或者窗口标题里带 FreeRDP。
 
     标题这条路很重要：某些环境（安全软件、沙箱）下 QueryFullProcessImageNameW
     会返回一个假路径，光看 exe 名会把真客户端判成别的程序。
     """
-    if _exe_of(pid) in _CLIENT_EXES:
-        return True
-    try:
-        for _h, _p, t in _top_windows(pid):
-            if 'freerdp' in (t or '').lower():
-                return True
-    except Exception:
-        pass
-    return False
+    now = time.time()
+    hit = _looks_cache.get(pid)
+    if hit and now - hit[1] < 15:
+        return hit[0]
+    ok = _exe_of(pid) in _CLIENT_EXES
+    if not ok:
+        try:
+            for _h, _p, t in _top_windows(pid):
+                if 'freerdp' in (t or '').lower():
+                    ok = True
+                    break
+        except Exception:
+            pass
+    _looks_cache[pid] = (ok, now)
+    return ok
 
 
 # clients.json：把「哪个进程是哪个用户的远程窗口」「窗口是不是藏着」记在盘上。
@@ -570,6 +609,7 @@ def _ensure_adopted():
     if not _adopted:
         _adopted = True
         _adopt_clients()
+        _ensure_hung_watch()
 
 
 def _top_windows(pid=None):
@@ -645,19 +685,25 @@ def _activate_window(hwnd):
     _user32.keybd_event(0x12, 0, 2, 0)              # ALT up (KEYEVENTF_KEYUP)
     if ok and _user32.GetForegroundWindow() == hwnd:
         return True
-    # 借 AttachThreadInput 挂到前台线程的输入队列上，绕开前台锁
+    # 借 AttachThreadInput 挂到前台线程的输入队列上，绕开前台锁。
+    # 一定要成对拆开：挂上之后不拆，目标线程的输入队列会一直跟着我们的线程走，
+    # 我们这边一阻塞，它就会「未响应」。
     this_t = _kernel32.GetCurrentThreadId()
     tgt_t = _user32.GetWindowThreadProcessId(hwnd, None)
     fg = _user32.GetForegroundWindow()
     fg_t = _user32.GetWindowThreadProcessId(fg, None) if fg else 0
-    _user32.AttachThreadInput(this_t, tgt_t, True)
-    if fg_t:
-        _user32.AttachThreadInput(this_t, fg_t, True)
-    _user32.BringWindowToTop(hwnd)
-    ok = bool(_user32.SetForegroundWindow(hwnd))
-    _user32.AttachThreadInput(this_t, tgt_t, False)
-    if fg_t:
-        _user32.AttachThreadInput(this_t, fg_t, False)
+    ok = False
+    attached = []
+    try:
+        if _user32.AttachThreadInput(this_t, tgt_t, True):
+            attached.append(tgt_t)
+        if fg_t and fg_t != tgt_t and _user32.AttachThreadInput(this_t, fg_t, True):
+            attached.append(fg_t)
+        _user32.BringWindowToTop(hwnd)
+        ok = bool(_user32.SetForegroundWindow(hwnd))
+    finally:
+        for t in attached:
+            _user32.AttachThreadInput(this_t, t, False)
     if ok and _user32.GetForegroundWindow() == hwnd:
         return True
     # 最后兜底：Alt+Tab 同款
@@ -708,6 +754,14 @@ def _spawn_client(info, hidden=False):
             '/p:' + pwd, '/cert:ignore',
             '/bpp:32', '/network:lan',
             '/audio-mode:redirect', '/log-level:ERROR']
+    # 画质/兼容性实验用的口子：config.json 里写 "client_args": "..." 就拼在命令行后面，
+    # 不用重打包。例如 "/gfx:AVC444"（走图形管线，避开 fastpath 位图）、"-compression"。
+    extra = str(_load_cfg().get('client_args') or '').strip()
+    if extra:
+        try:
+            args += shlex.split(extra, posix=True)
+        except ValueError:
+            args += extra.split()
     if w and h:
         args += ['/w:%d' % w, '/h:%d' % h]
     else:
@@ -724,8 +778,11 @@ def _spawn_client(info, hidden=False):
         creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
 
 
-def _connect(info, hidden=False, auto=False):
-    """连上（或重连）该用户的桌面。hidden=True 时窗口不显示，但连接建立、会话 Active。"""
+def _connect(info, hidden=False, auto=False, reveal=False):
+    """连上（或重连）该用户的桌面。hidden=True 时窗口不显示，但连接建立、会话 Active。
+
+    reveal=True：重连完成后把窗口请回桌面并激活（原来的窗口是可见的，不该悄悄藏掉）。
+    """
     key = info['name'].lower()
     try:
         proc = _spawn_client(info, hidden=hidden)
@@ -741,9 +798,12 @@ def _connect(info, hidden=False, auto=False):
     _clients[key] = {'proc': proc, 'pid': proc.pid, 'hwnd': 0, 'hidden': bool(hidden),
                      'intent': '', 'auto': auto, 't0': time.time()}
     _save_clients()
+    _ensure_hung_watch()
     if hidden:
         threading.Thread(target=_hide_when_ready, args=(key, proc), daemon=True).start()
-    threading.Thread(target=_watch_client, args=(key, proc, info), daemon=True).start()
+    elif reveal:
+        threading.Thread(target=_show_when_ready, args=(key, proc), daemon=True).start()
+    threading.Thread(target=_watch_client, args=(key, proc, info, bool(hidden)), daemon=True).start()
     return True, None
 
 
@@ -767,11 +827,30 @@ def _kill_client(key):
     _save_clients()
 
 
-def _watch_client(key, proc, info):
-    """盯着客户端进程：用户点 X 关窗 = 连接断掉 → 会话变 Disc。
+def _show_when_ready(key, proc):
+    """重连后把窗口请回桌面并激活（原来可见的，重连后也应可见）。"""
+    for _ in range(40):                      # 最多等 10s
+        if proc.poll() is not None:
+            return
+        hwnd, _pid = _client_window(key, key)
+        if hwnd:
+            if key in _clients:
+                _clients[key]['hidden'] = False
+            _set_visible(hwnd, True)
+            return
+        time.sleep(0.25)
 
-    想「关掉窗口后台还激活」，就在这种情况下悄悄在后台重连一次（窗口隐藏），
-    会话回到 Active，而用户桌面上什么都不会弹出来。
+
+def _watch_client(key, proc, info, was_hidden=True):
+    """盯着客户端进程。
+
+    客户端自己退出有两种情况：
+      · 用户点了窗口的 X —— 会话变 Disc；想「关掉窗口后台还激活」，就在后台悄悄
+        重连一次（窗口隐藏），桌面上什么都不会弹出来；
+      · 客户端崩溃 —— FreeRDP 在重画面（游戏/视频）下会因 fastpath 位图更新解析
+        失败而直接退出，日志里是 "Fastpath update Bitmap failed, status 0"。这时
+        窗口会先卡成「未响应」再消失，必须把窗口按原样接回来，否则用户看到的就是
+        「经常没响应，然后窗口没了」。
     """
     proc.wait()
     with _lock:
@@ -785,18 +864,101 @@ def _watch_client(key, proc, info):
         return                     # 我们自己关的；或者后台重连也秒退，不再循环
     if not _keep_alive():
         return
+    # 短时间内反复崩：拉长间隔，避免「崩-连-崩」把机器拖垮
+    now = time.time()
+    hist = [t for t in _crashes.get(key, []) if now - t < 300]
+    hist.append(now)
+    _crashes[key] = hist
+    delay = 0.0 if len(hist) <= 2 else min(30.0, 5.0 * (len(hist) - 2))
+    _log('%s 客户端退出（5 分钟内第 %d 次），%s重连，窗口原本%s' % (
+        info['name'], len(hist), ('%.0fs 后' % delay) if delay else '',
+        '隐藏' if was_hidden else '可见'))
+    if delay:
+        time.sleep(delay)
     time.sleep(2.0)                # 等系统把会话状态刷成 Disc
     sess = _sessions().get(info['name'].lower())
     if not sess or sess['state'] != 'disc':
         return                     # 会话没了（被注销）或仍在线，不需要保活
-    ok, err = _connect(info, hidden=True, auto=True)
-    try:
-        with open(os.path.join(BASE_DIR, 'client.log'), 'a', encoding='utf-8') as f:
-            f.write('[%s] keep-alive %s: %s\n' % (
-                time.strftime('%Y-%m-%d %H:%M:%S'), info['name'],
-                'reconnected hidden' if ok else 'failed: %s' % err))
-    except OSError:
-        pass
+    ok, err = _connect(info, hidden=was_hidden, auto=True, reveal=not was_hidden)
+    _log('保活 %s: %s' % (info['name'], '已重连（窗口%s）' % ('隐藏' if was_hidden else '可见')
+                          if ok else '失败: %s' % err))
+
+
+_crashes = {}          # key -> [退出时间...]，用来算重连退避
+
+
+_hung_state = {}       # key -> 连续判定无响应的次数
+_hung_restarts = {}    # key -> [重启时间...]，防误判造成反复重启
+_hung_started = False
+_hung_lock = threading.Lock()
+
+
+def _ensure_hung_watch():
+    """全局只起一个「未响应」看门狗。"""
+    global _hung_started
+    with _hung_lock:
+        if _hung_started:
+            return
+        _hung_started = True
+    threading.Thread(target=_watch_hung, daemon=True).start()
+
+
+def _watch_hung():
+    """盯着客户端窗口有没有卡死（系统标题栏出现「未响应」就是这个状态）。
+
+    FreeRDP 卡住的时候进程还活着，所以保活逻辑（等进程退出）救不回来：窗口会一直
+    白着、显示「未响应」，几十秒后才可能自己崩掉。这里连续两次（约 8s）确认窗口
+    不回消息，就主动重启客户端——会话本身不动，重连后回到原来的桌面。
+    """
+    while True:
+        time.sleep(4)
+        try:
+            for key, ent in list(_clients.items()):
+                if not _alive(ent):
+                    continue
+                if time.time() - float(ent.get('t0') or 0) < 8:
+                    continue                       # 刚拉起，还在握手
+                hwnd, _pid = _client_window(key, key)
+                if not hwnd:
+                    continue
+                if _responds(hwnd):
+                    _hung_state.pop(key, None)
+                    continue
+                _hung_state[key] = _hung_state.get(key, 0) + 1
+                if _hung_state[key] < 2:
+                    continue
+                _hung_state.pop(key, None)
+                now = time.time()
+                recent = [t for t in _hung_restarts.get(key, []) if now - t < 120]
+                if len(recent) >= 2:
+                    _log('%s 反复无响应但重启无效（疑似误判或整机过载），暂停自动重启'
+                         % key)
+                    _hung_restarts[key] = recent
+                    continue
+                _hung_restarts[key] = recent + [now]
+                threading.Thread(target=_restart_hung, args=(key, dict(ent)),
+                                 daemon=True).start()
+        except Exception:
+            pass
+
+
+def _restart_hung(key, ent):
+    """客户端窗口卡死：结束进程再按原来的可见性重连。"""
+    info = _load().get(key)
+    if not info or not info.get('password'):
+        return
+    hidden = bool(ent.get('hidden'))
+    _log('窗口无响应，重启客户端 %s（窗口原本%s）' % (info['name'], '隐藏' if hidden else '可见'))
+    if _clients.get(key) is ent:
+        _clients.pop(key, None)
+        _save_clients()
+    pid = _pid_of(ent)
+    if pid and _pid_running(pid):
+        _run(['taskkill', '/PID', str(pid), '/T', '/F'])
+    time.sleep(1.5)
+    ok, err = _connect(info, hidden=hidden, auto=True, reveal=not hidden)
+    if not ok:
+        _log('重启失败 %s: %s' % (info['name'], err))
 
 
 def login_user(name):
