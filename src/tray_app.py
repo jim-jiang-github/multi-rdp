@@ -84,8 +84,26 @@ _srv = None
 def main():
     _elevate_and_exit()
     global _srv
-    _srv = server_mod.start_server()
+    try:
+        _srv = server_mod.start_server()
+    except OSError:
+        # 端口已被占用：多半是已经有一个实例在跑，直接打开它的界面即可
+        _open_webui()
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                '检测到 MultiRDP 已经在运行，已为你打开它的界面。\n'
+                '如果界面功能异常（例如创建用户报错），请先右键托盘图标退出旧实例，'
+                '再重新启动本程序。',
+                'MultiRDP', 0x40)   # MB_ICONINFORMATION
+        except Exception:
+            pass
+        return
     threading.Thread(target=_srv.serve_forever, daemon=True).start()
+
+    # 双击 exe 后自动打开浏览器（稍等片刻，确保服务已开始监听）
+    threading.Timer(1.0, _open_webui).start()
 
     import pystray
     menu = pystray.Menu(
