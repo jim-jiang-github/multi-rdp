@@ -417,6 +417,8 @@ def _freerdp_exe():
 _clients = {}   # username.lower() -> {'proc','hwnd','hidden','intent','auto','t0'}
 
 SW_HIDE, SW_SHOW, SW_RESTORE, SW_MINIMIZE = 0, 1, 9, 6
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+HWND_TOPMOST, HWND_NOTOPMOST = ctypes.c_void_p(-1), ctypes.c_void_p(-2)
 GW_OWNER = 4
 _CLIENT_EXES = ('sdl3-freerdp.exe', 'wfreerdp.exe', 'mstsc.exe')
 
@@ -433,6 +435,9 @@ _user32.GetForegroundWindow.restype = ctypes.c_void_p
 _user32.AttachThreadInput.argtypes = [ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int]
 _user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
 _user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+_user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+                                 ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+_user32.BringWindowToTop.argtypes = [ctypes.c_void_p]
 _kernel32.OpenProcess.restype = ctypes.c_void_p
 _kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
 _kernel32.QueryFullProcessImageNameW.argtypes = [
@@ -667,17 +672,35 @@ def _client_window(name, key=None):
     return 0, 0
 
 
+def _raise_window(hwnd):
+    """把窗口翻到最上层（不需要前台权限）：临时置顶再取消置顶。"""
+    _user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+    _user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+
+
 def _activate_window(hwnd):
     """把窗口拉到前台并激活（拿到输入焦点）。
 
-    Windows 有「前台锁」：不是前台进程直接调 SetForegroundWindow 会被拒绝，
-    所以按顺序试：直接调 → 模拟一下 ALT 键解锁再调 → AttachThreadInput 把
-    输入队列借过来再调 → SwitchToThisWindow（Alt+Tab 内部用的就是它）。
+    Windows 有「前台锁」：不是前台进程直接调 SetForegroundWindow 会被拒绝——
+    我们的客户端正是由后台的 MultiRDP 拉起的，所以窗口会「创建成功但压在别人后面」，
+    看起来就像根本没有弹出来。按顺序试，哪级成了就停：
+      1. 直接 SetForegroundWindow
+      2. 临时置顶再取消置顶（不需要前台权限，至少翻到最上层）
+      3. 模拟一次 ALT 按下/松开，骗过前台锁再调
+      4. AttachThreadInput 借来目标线程的输入队列再调
+      5. SwitchToThisWindow（Alt+Tab 内部用的原语）
     """
+    if not hwnd:
+        return False
     _user32.ShowWindow(hwnd, SW_RESTORE if _user32.IsIconic(hwnd) else SW_SHOW)
     if _user32.GetForegroundWindow() == hwnd:
         return True
-    if _user32.SetForegroundWindow(hwnd):
+    if _user32.SetForegroundWindow(hwnd) and _user32.GetForegroundWindow() == hwnd:
+        return True
+    _raise_window(hwnd)
+    if _user32.GetForegroundWindow() == hwnd:
         return True
     # ALT 按下又松开，骗过前台锁（系统会以为用户刚按过键）
     _user32.keybd_event(0x12, 0, 0, 0)              # ALT down
@@ -828,17 +851,29 @@ def _kill_client(key):
 
 
 def _show_when_ready(key, proc):
-    """重连后把窗口请回桌面并激活（原来可见的，重连后也应可见）。"""
-    for _ in range(40):                      # 最多等 10s
+    """重连 / 登录后把窗口请到桌面上并带到前台。
+
+    窗口刚建好时不一定抢得到前台（我们的进程在后台），所以多试几次，每次间隔
+    0.8s；结果写进 client.log，方便现场判断是「没找到窗口」还是「找到了但没抢到前台」。
+    """
+    for _ in range(40):                      # 最多等 10s 让窗口出现
         if proc.poll() is not None:
             return
         hwnd, _pid = _client_window(key, key)
         if hwnd:
             if key in _clients:
                 _clients[key]['hidden'] = False
-            _set_visible(hwnd, True)
+            got = False
+            for _i in range(4):
+                got = _set_visible(hwnd, True)
+                if _user32.GetForegroundWindow() == hwnd:
+                    break
+                time.sleep(0.8)
+            _log('置前 %s: %s' % (key, '已激活到前台' if _user32.GetForegroundWindow() == hwnd
+                                  else ('已翻到最上层但没拿到焦点' if got else '置前失败')))
             return
         time.sleep(0.25)
+    _log('置前 %s: 没找到客户端窗口' % key)
 
 
 def _watch_client(key, proc, info, was_hidden=True):
@@ -968,17 +1003,22 @@ def login_user(name):
     if not info:
         return False, _t('用户不存在', 'User not found')
     ent = _clients.get(key)
-    if _alive(ent):
-        if ent.get('hidden'):
-            ok, err = show_client(name)     # 之前收进后台了，直接把窗口请回来
+    if ent and _alive(ent):
+        hwnd, _pid = _client_window(name)
+        # 收进后台了，或者记录说「可见」其实窗口被藏起来了：都按「请回来」处理
+        if ent.get('hidden') or not hwnd or not _user32.IsWindowVisible(hwnd):
+            ok, err = show_client(name)
             return (True, None) if ok else (False, err)
-        return True, None                   # 窗口已经开着，不重复弹
+        # 窗口在，但很可能被别的窗口压着（客户端是后台进程拉起的，没有前台权限）
+        _activate_window(hwnd)
+        return True, None
     if not info.get('password'):
         return False, _t('该用户没有保存密码，无法一键登录（可删除后重新注册）',
                          'This user has no saved password, one-click login is unavailable (delete and re-create it)')
     if not _freerdp_exe():
         return _mstsc_connect(info)
-    return _connect(info)
+    # reveal：窗口一建好就翻到前台并激活，否则它会悄悄躲在别的窗口后面
+    return _connect(info, reveal=True)
 
 
 def _mstsc_connect(info):

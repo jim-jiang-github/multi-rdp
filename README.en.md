@@ -22,7 +22,10 @@ colleagues their own desktop, and so on.
 - **One-click user creation** — random username (`p` + 6 chars, ambiguous characters avoided),
   14-char strong password, automatically added to `Remote Desktop Users`, optionally to
   `Administrators` (so UAC only needs a click instead of a password)
-- **One-click login** — launches FreeRDP against `127.0.0.1`, one window per user; prefers
+- **One-click login** — launches FreeRDP against `127.0.0.1`, one window per user. As soon as the
+  window exists it is raised to the top and activated (the client is spawned by a background
+  process and has no foreground rights, so without this it stays behind other windows); clicking
+  Login for a user that is already running simply brings that window to the front. Prefers
   `sdl3-freerdp.exe` (correct rendering) and falls back to `wfreerdp.exe` / `mstsc`;
   resolution is configurable (auto-match this screen / fullscreen / pick from the
   display's supported modes)
