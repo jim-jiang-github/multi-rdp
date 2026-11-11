@@ -12,9 +12,11 @@ colleagues their own desktop, and so on.
 If this tool made your life easier, feel free to scan a QR code and buy the author a coffee
 (any amount is appreciated — it's the thought that counts):
 
-| WeChat Pay | Alipay |
-|:---:|:---:|
-| ![WeChat Pay QR code](docs/donate_wechat.jpg) | ![Alipay QR code](docs/donate_alipay.jpg) |
+<p align="center">
+  <img src="docs/donate_wechat.jpg" width="300" alt="WeChat Pay QR code">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/donate_alipay.jpg" width="300" alt="Alipay QR code">
+</p>
 
 ![Web UI screenshot](docs/screenshot_webui_en.png)
 

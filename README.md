@@ -13,9 +13,11 @@
 
 如果这个工具帮到了你，欢迎扫码请杯咖啡（金额随意，心意最重要）：
 
-| 微信支付 | 支付宝 |
-|:---:|:---:|
-| ![微信支付收款码](docs/donate_wechat.jpg) | ![支付宝收款码](docs/donate_alipay.jpg) |
+<p align="center">
+  <img src="docs/donate_wechat.jpg" width="300" alt="微信支付收款码">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/donate_alipay.jpg" width="300" alt="支付宝收款码">
+</p>
 
 ![Web UI 截图](docs/screenshot_webui.png)
 
