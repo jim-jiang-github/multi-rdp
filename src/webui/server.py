@@ -1883,7 +1883,7 @@ button:disabled{opacity:.5;cursor:default}
 <div class="wrap">
 <div class="top">
 <div><div class="ver" id="ver"></div>
-<div class="glinks"><a id="lnkDl" href="https://github.com/jim-jiang-github/multi-rdp/releases/latest" target="_blank" rel="noopener"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span id="txtDl"></span></a><span class="gsep">·</span><a id="lnkDoc" href="https://github.com/jim-jiang-github/multi-rdp#readme" target="_blank" rel="noopener"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4c.41 0 .78.17 1.04.44l.21.22c.26.27.63.44 1.04.44h8.21A.75.75 0 0 1 16 2.84v9.91a.75.75 0 0 1-.75.75h-4c-.41 0-.78-.17-1.04-.44l-.21-.22a1.46 1.46 0 0 0-1.04-.44H.75A.75.75 0 0 1 0 12.66V1.75Zm1.5 10.81h6.46c.51 0 1 .21 1.35.58l.21.22c.05.05.12.09.19.09h3.79V3.6h-7.5c-.51 0-1-.21-1.35-.58l-.21-.22a.19.19 0 0 0-.19-.09H1.5v9.85Z"/></svg><span id="txtDoc"></span></a><span class="gsep">·</span><a id="lnkIss" href="https://github.com/jim-jiang-github/multi-rdp/issues" target="_blank" rel="noopener"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8.75-3.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM8 13.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm1.25-4.5a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z"/></svg><span id="txtIss"></span></a></div></div>
+<div class="glinks"><a id="lnkDl" href="https://github.com/jim-jiang-github/multi-rdp/releases/latest" target="_blank" rel="noopener"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span id="txtDl"></span></a><span class="gsep">·</span><a id="lnkDoc" href="https://github.com/jim-jiang-github/multi-rdp#readme" target="_blank" rel="noopener"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4c.41 0 .78.17 1.04.44l.21.22c.26.27.63.44 1.04.44h8.21A.75.75 0 0 1 16 2.84v9.91a.75.75 0 0 1-.75.75h-4c-.41 0-.78-.17-1.04-.44l-.21-.22a1.46 1.46 0 0 0-1.04-.44H.75A.75.75 0 0 1 0 12.66V1.75Zm1.5 10.81h6.46c.51 0 1 .21 1.35.58l.21.22c.05.05.12.09.19.09h3.79V3.6h-7.5c-.51 0-1-.21-1.35-.58l-.21-.22a.19.19 0 0 0-.19-.09H1.5v9.85Z"/></svg><span id="txtDoc"></span></a><span class="gsep">·</span><a id="lnkIss" href="https://github.com/jim-jiang-github/multi-rdp/issues" target="_blank" rel="noopener"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8.75-3.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM8 13.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm1.25-4.5a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z"/></svg><span id="txtIss"></span></a><span class="gsep">·</span><a id="lnkUpd" href="javascript:void(0)" onclick="checkUpd()"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5A5.5 5.5 0 0 0 2.5 8c0 .4-.33.75-.75.75A.75.75 0 0 1 1 8a7 7 0 1 1 2.05 4.95.75.75 0 1 1 1.06-1.06A5.5 5.5 0 0 0 8 2.5Zm-.22 3.03a.75.75 0 0 1 1.06 0l1.88 1.88a.75.75 0 1 1-1.06 1.06l-.59-.59v3.37a.75.75 0 0 1-1.5 0V7.88l-.59.59a.75.75 0 1 1-1.06-1.06l1.86-1.88Z"/></svg><span id="txtUpd"></span></a></div></div>
 <button class="ghost langbtn" id="btnLang" onclick="toggleLang()">English</button>
 </div>
 <div id="banner"></div>
@@ -1988,6 +1988,9 @@ focusFail:'切换窗口失败：',
  gDlTip:'打开 GitHub Releases 页面下载最新安装包（程序也会自动检查更新）',
  gDocTip:'查看 README：功能介绍、常见问题与使用说明',
  gIssTip:'遇到问题或想提建议？到 GitHub Issues 提一下',
+ gUpd:'检查更新',
+ gUpdTip:'手动查一次 GitHub 上有没有新版本（程序每小时也会自动查）',
+ updDev:'开发版不参与自动升级，正式版才有更新检查',
  updFound:'发现新版本 v{v}（当前 v{c}）',
  updInsecure:'当前网络经代理中转，已跳过 HTTPS 证书校验（下载仍以 SHA256 校验为准）',
  updChecking:'正在检查更新…',
@@ -2079,6 +2082,9 @@ focusFail:'Failed to switch window: ',
  gDlTip:'Open GitHub Releases to grab the latest build (the app also checks for updates on its own)',
  gDocTip:'Read the README: features, FAQ and usage notes',
  gIssTip:'Found a bug or have an idea? Open a GitHub issue',
+ gUpd:'Check for updates',
+ gUpdTip:'Look for a newer release on GitHub (the app also checks automatically every hour)',
+ updDev:'Dev build - auto-update only applies to release builds',
  updFound:'Update available: v{v} (you have v{c})',
  updInsecure:'Traffic goes through a TLS-intercepting proxy - certificate check skipped (downloads are still SHA256-verified)',
  updChecking:'Checking for updates…',
@@ -2111,7 +2117,7 @@ document.getElementById('resFull').textContent=t('resFull');
 document.getElementById('grpNative').label=t('grpNative');
 document.getElementById('grpCommon').label=t('grpCommon');
 document.getElementById('btnLang').textContent=t('langBtn');
-for(const [id,k,tk] of [['txtDl','gDl','gDlTip'],['txtDoc','gDoc','gDocTip'],['txtIss','gIss','gIssTip']]){
+for(const [id,k,tk] of [['txtDl','gDl','gDlTip'],['txtDoc','gDoc','gDocTip'],['txtIss','gIss','gIssTip'],['txtUpd','gUpd','gUpdTip']]){
 const s=document.getElementById(id);if(s){s.textContent=t(k);s.parentNode.title=t(tk)}}
 }
 async function api(path,body){
@@ -2182,6 +2188,8 @@ main=t('updApplying');btnOff=true;laterOn=false;progOn=true;pct=100;
 show=updManual;main=t('updChecking');btnOff=true;laterOn=false;
 }else if(ph==='uptodate'){
 show=updManual;main=t('updUptodate',{v:s.current||'?'});btnOff=true;laterOn=false;
+}else if(ph==='dev'){
+show=updManual;main=t('updDev');laterOn=false;
 }else if(ph==='error'){
 show=updManual||!!s.version;main=t('updFail')+(s.error||'');btn=t('updRetry');
 }else{
@@ -2211,8 +2219,13 @@ const ph=updState&&updState.phase;
 const fast=(ph==='downloading'||ph==='applying'||ph==='checking');
 updTimer=setTimeout(updPoll,fast?900:(updManual?5000:20000));
 }
-async function updGo(){
-const s=updState||{};
+/* 头部「检查更新」：只触发一次查新，结果交给更新横幅展示 */
+async function checkUpd(){
+updManual=true;
+await api('update',{action:'check'});
+updPoll();
+}
+async function updGo(){const s=updState||{};
 if(s.phase==='applying'||s.phase==='downloading')return;
 let action='check';
 if(s.phase==='ready')action='apply';
