@@ -2274,19 +2274,19 @@ const bg=u.online&&u.window==='hidden';
 const noWin=u.window==='none';
 const off=!u.connected;
 const hasPic=!!c.img.dataset.url;
-/* 画面留着：断开/隐藏只在上面压一层灰，绝不把图撤掉——断开前最后那一帧就是这个卡片的样子 */
+/* 画面留着：断开只压一层灰提示，绝不把图撤掉；隐藏时画面是实时截的，原样显示 */
 const st=u.pending?t('pending'):(bg?t('bg'):(u.online?t('online'):(u.connected?t('disconnected'):t('offline'))));
 const stTitle=bg?t('tagBgTitle'):(u.online?t('tagActiveTitle'):(u.connected?t('tagDiscTitle'):(u.pending?t('tagPendTitle'):t('tagOffTitle'))));
 c.badge.textContent=st;
 c.badge.title=stTitle;
 c.badge.style.color=u.pending?'#f0c27b':(u.online?'#8ce8c4':(u.connected?'#f2d19b':'#cfd5e6'));
-const phTxt=u.pending?t('pending'):(bg?t('shotHidden'):(noWin?(u.connected?t('shotOff'):t('shotNone')):(u.connected?t('shotWait'):t('shotOff'))));
+const phTxt=u.pending?t('pending'):(bg?t('bg'):(noWin?(u.connected?t('shotOff'):t('shotNone')):(u.connected?t('shotWait'):t('shotOff'))));
 c.pht.textContent=phTxt;
-/* 没画面：占位符（图标+文字）；有画面但断开/隐藏：最后一帧压灰 + veil 提示 */
-c.veil.textContent=(hasPic&&(bg||off))?(bg?t('shotHidden'):t('shotOff')):'';
+/* 没画面：占位符（图标+文字）；断开：最后一帧压灰 + veil 提示。隐藏不停灰不盖字：画面是实时的，状态看徽标 */
+c.veil.textContent=hasPic&&off?t('shotOff'):'';
 let cls='shot';
-if(bg||noWin||off)cls+=' is-dim';
-if(hasPic&&(bg||off))cls+=' veil-on';
+if(noWin||off)cls+=' is-dim';
+if(hasPic&&off)cls+=' veil-on';
 c.shot.className=cls;
 if(hasPic){c.ph.style.display='none';c.img.classList.add('ready')}
 else{c.ph.style.display='flex'}
