@@ -1936,7 +1936,6 @@ en:{
  showFail:'Failed to show the window: ',
  tagActiveTitle:'This user is connected to a remote desktop session (uses one session slot)',
  tagBgTitle:'Window hidden but still connected: session stays Active, programs keep rendering and holding focus - just not visible',
- tagActiveTitle:'This user is connected to a remote desktop session (uses one session slot)',
  tagDiscTitle:'The session is kept: programs keep running. Click Login to reconnect to the same desktop',
  tagOffTitle:'No session for this user (never signed in, or signed out)',
  login:'Login', reset:'Reset', grant:'Grant admin', del:'Delete', delPending:'Clean up',
@@ -2188,7 +2187,10 @@ return c;
 function updateCard(c,u){
 c.user=u;
 c.nm.textContent=u.name;
+c.adm.textContent=t('admin');
+c.adm.title=t('tagAdmTitle');
 c.adm.style.display=u.admin?'':'none';
+c.shot.title=t('shotTip');
 const bg=u.online&&u.window==='hidden';
 const noWin=u.window==='none';
 const off=!u.connected;
@@ -2203,7 +2205,8 @@ const stTitle=bg?t('tagBgTitle'):(u.online?t('tagActiveTitle'):(u.connected?t('t
 c.badge.textContent=st;
 c.badge.title=stTitle;
 c.badge.style.color=u.pending?'#f0c27b':(u.online?'#8ce8c4':(u.connected?'#f2d19b':'#cfd5e6'));
-c.veil.textContent=u.pending?t('pending'):(bg?t('shotHidden'):(noWin?(u.connected?t('shotOff'):t('shotNone')):t('shotWait')));
+/* 只有盖在画面上时 veil 才带文字；没画面时由占位符 pht 显示，避免同一句出现两遍 */
+c.veil.textContent=hasPic?'':(u.pending?t('pending'):(bg?t('shotHidden'):(noWin?(u.connected?t('shotOff'):t('shotNone')):t('shotWait'))));
 if(hasPic){c.ph.style.display='none';c.img.classList.add('ready')}
 else{c.ph.style.display='flex';
 c.pht.textContent=u.pending?'':(noWin?(u.connected?t('shotOff'):t('shotNone')):t('shotWait'))}
@@ -2358,8 +2361,9 @@ try{applyStatus(await (await fetch('/api/status')).json())}catch(e){}
 async function toggleLang(){
 LANG=(LANG==='zh'?'en':'zh');
 applyI18n();
+checkEnv();          // 版本行/横幅跟着换语言
+await refresh();     // 卡片上的徽标、按钮、tooltip 重建
 try{await api('config',{lang:LANG})}catch(e){}
-await refresh();
 }
 (async function init(){
 try{
