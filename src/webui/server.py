@@ -1825,7 +1825,6 @@ button:disabled{opacity:.5;cursor:default}
 <optgroup label="本机支持" id="grpNative"></optgroup>
 <optgroup label="常用分辨率" id="grpCommon"></optgroup>
 </select></div>
-<button class="primary newbtn" id="btnCreate" onclick="register()">创建账号</button>
 <button class="danger newbtn" id="btnFix" style="display:none" onclick="fixRdp()">修复画面</button>
 </div>
 </div>
@@ -1837,7 +1836,6 @@ zh:{
  title:'用户管理',
  subtitle:'点一下自动创建一个独立账号，密码由程序随机生成并保存',
  btnNew:'新建账号',
- btnCreate:'创建账号',
  newTip:'点击创建新账号，账号和密码自动生成',
  chkAdminTip:'勾选后新账号加入管理员组：启动需要管理员的程序（如游戏启动器）时 UAC 只需点「是」，不用输管理员密码',
  btnFix:'修复画面',
@@ -1925,7 +1923,6 @@ en:{
  title:'User Management',
  subtitle:'Create an isolated local account in one click — the password is generated and saved automatically',
  btnNew:'New account',
- btnCreate:'Create',
  newTip:'Click to create a new account - username and password are generated for you',
  chkAdminTip:'Add new accounts to the Administrators group: programs that need elevation only ask for a Yes/No instead of an admin password',
  btnFix:'Fix display',
@@ -2018,7 +2015,6 @@ document.title=t('title');
 document.getElementById('ttl').textContent=t('title');
 document.getElementById('sub').textContent=t('subtitle');
 document.getElementById('newLbl').textContent=t('btnNew');
-document.getElementById('btnCreate').textContent=t('btnCreate');
 document.getElementById('btnFix').textContent=t('btnFix');
 document.getElementById('chkAdminText').textContent=t('chkAdmin');
 document.getElementById('chkAdminLbl').title=t('chkAdminTip');
@@ -2313,15 +2309,15 @@ refresh();
 }
 
 async function register(){
-const btn=document.getElementById('btnNew'),btn2=document.getElementById('btnCreate');
-btn.disabled=true;btn2.disabled=true;
+const btn=document.getElementById('btnNew');
+btn.disabled=true;
 msg(t('creating'));
 try{
 const r=await api('register',{admin:document.getElementById('chkAdmin').checked});
 if(r.ok)msg(t(r.user.admin?'createdAdmin':'createdNormal',{name:r.user.name}),'ok');
 else msg(r.error,'err');
 }catch(e){msg(t('requestFail')+e,'err')}
-btn.disabled=false;btn2.disabled=false;
+btn.disabled=false;
 refresh();
 }
 async function hideWin(name){
