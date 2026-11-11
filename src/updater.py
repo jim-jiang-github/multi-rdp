@@ -406,6 +406,23 @@ def _wait_pid(pid, timeout=60):
         pass
 
 
+def _clean_env():
+    """拉起新 exe 前把 PyInstaller 引导器的协调变量摘掉。
+
+    onefile 程序的引导器是「父进程解压 → 再拉一个自己当子进程」，子进程的环境里
+    带着这些 _PYI_* / _MEI* 变量。原样传给新 exe 的话，它的引导器会误以为自己是
+    被拉起的子进程：跳过解压、直接沿用旧进程的解压目录和已被改名的旧 exe 路径，
+    结果就是启动即崩（报 _MEI00000000 目录不存在）。
+    """
+    out = {}
+    for k, v in os.environ.items():
+        ku = k.upper()
+        if ku.startswith('_PYI_') or ku.startswith('_MEI'):
+            continue
+        out[k] = v
+    return out
+
+
 def apply():
     """把已下载的版本换上去并重启。成功后调用方必须立刻退出。
 
@@ -445,7 +462,7 @@ def apply():
     try:
         subprocess.Popen([tgt, '--after-update', str(os.getpid())],
                          cwd=os.path.dirname(tgt), close_fds=True,
-                         creationflags=flags)
+                         creationflags=flags, env=_clean_env())
     except Exception as e:
         # 文件已经是新的了，只是没能自动拉起来；下次启动就是新版
         return True, '新版本已就位，但自动重启失败：%s' % e
