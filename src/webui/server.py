@@ -1796,7 +1796,11 @@ body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:va
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 h1{font-size:22px;font-weight:600;margin-bottom:4px}
 .sub{color:var(--sub);font-size:13px;margin-bottom:6px}
-.ver{color:var(--sub);font-size:11px;opacity:.62;margin-bottom:22px;font-variant-numeric:tabular-nums}
+.ver{color:var(--sub);font-size:11px;opacity:.62;margin-bottom:4px;font-variant-numeric:tabular-nums}
+.glinks{margin-bottom:20px;font-size:12px}
+.glinks a{color:var(--brand);text-decoration:none;border-bottom:1px dotted currentColor;cursor:pointer}
+.glinks a:hover{opacity:.8}
+.gsep{color:var(--sub);opacity:.5;margin:0 6px}
 button{height:40px;border:none;border-radius:9px;padding:0 18px;font-size:14px;cursor:pointer;font-weight:500}
 .primary{background:var(--brand);color:#fff}
 .ghost{background:#eef0f8;color:var(--txt)}
@@ -1877,7 +1881,8 @@ button:disabled{opacity:.5;cursor:default}
 </style></head><body>
 <div class="wrap">
 <div class="top">
-<div><div class="ver" id="ver"></div></div>
+<div><div class="ver" id="ver"></div>
+<div class="glinks"><a id="lnkDl" href="https://github.com/jim-jiang-github/multi-rdp/releases/latest" target="_blank" rel="noopener"></a><span class="gsep">·</span><a id="lnkDoc" href="https://github.com/jim-jiang-github/multi-rdp#readme" target="_blank" rel="noopener"></a><span class="gsep">·</span><a id="lnkIss" href="https://github.com/jim-jiang-github/multi-rdp/issues" target="_blank" rel="noopener"></a></div></div>
 <button class="ghost langbtn" id="btnLang" onclick="toggleLang()">English</button>
 </div>
 <div id="banner"></div>
@@ -1976,6 +1981,12 @@ focusFail:'切换窗口失败：',
  langBtn:'English',
  buildLbl:'构建',
  devBuild:'开发版',
+ gDl:'GitHub 下载最新版',
+ gDoc:'使用说明',
+ gIss:'反馈问题',
+ gDlTip:'打开 GitHub Releases 页面下载最新安装包（程序也会自动检查更新）',
+ gDocTip:'查看 README：功能介绍、常见问题与使用说明',
+ gIssTip:'遇到问题或想提建议？到 GitHub Issues 提一下',
  updFound:'发现新版本 v{v}（当前 v{c}）',
  updInsecure:'当前网络经代理中转，已跳过 HTTPS 证书校验（下载仍以 SHA256 校验为准）',
  updChecking:'正在检查更新…',
@@ -2061,6 +2072,12 @@ focusFail:'Failed to switch window: ',
  langBtn:'中文',
  buildLbl:'build',
  devBuild:'dev build',
+ gDl:'Download latest (GitHub)',
+ gDoc:'Documentation',
+ gIss:'Report an issue',
+ gDlTip:'Open GitHub Releases to grab the latest build (the app also checks for updates on its own)',
+ gDocTip:'Read the README: features, FAQ and usage notes',
+ gIssTip:'Found a bug or have an idea? Open a GitHub issue',
  updFound:'Update available: v{v} (you have v{c})',
  updInsecure:'Traffic goes through a TLS-intercepting proxy - certificate check skipped (downloads are still SHA256-verified)',
  updChecking:'Checking for updates…',
@@ -2093,6 +2110,8 @@ document.getElementById('resFull').textContent=t('resFull');
 document.getElementById('grpNative').label=t('grpNative');
 document.getElementById('grpCommon').label=t('grpCommon');
 document.getElementById('btnLang').textContent=t('langBtn');
+for(const [id,k,tk] of [['lnkDl','gDl','gDlTip'],['lnkDoc','gDoc','gDocTip'],['lnkIss','gIss','gIssTip']]){
+const a=document.getElementById(id);if(a){a.textContent=t(k);a.title=t(tk)}}
 }
 async function api(path,body){
 try{
