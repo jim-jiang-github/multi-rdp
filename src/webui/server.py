@@ -1542,7 +1542,8 @@ body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:va
 .wrap{width:100%;max-width:1180px}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 h1{font-size:22px;font-weight:600;margin-bottom:4px}
-.sub{color:var(--sub);font-size:13px;margin-bottom:24px}
+.sub{color:var(--sub);font-size:13px;margin-bottom:6px}
+.ver{color:var(--sub);font-size:11px;opacity:.62;margin-bottom:22px;font-variant-numeric:tabular-nums}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;box-shadow:0 1px 2px rgba(20,20,50,.04)}
 .row{display:flex;gap:10px;margin-bottom:20px;align-items:center}
 button{height:40px;border:none;border-radius:9px;padding:0 18px;font-size:14px;cursor:pointer;font-weight:500}
@@ -1588,7 +1589,7 @@ button:disabled{opacity:.5;cursor:default}
 </style></head><body>
 <div class="wrap">
 <div class="top">
-<div><h1 id="ttl">用户管理</h1><div class="sub" id="sub"></div></div>
+<div><h1 id="ttl">用户管理</h1><div class="sub" id="sub"></div><div class="ver" id="ver"></div></div>
 <button class="ghost langbtn" id="btnLang" onclick="toggleLang()">English</button>
 </div>
 <div id="banner"></div>
@@ -1681,7 +1682,8 @@ focusFail:'切换窗口失败：',
  resFull:'全屏（无窗口边框）',
  grpNative:'本机支持',
  grpCommon:'常用分辨率',
- langBtn:'English'
+ langBtn:'English',
+ buildLbl:'构建'
 },
 en:{
  title:'User Management',
@@ -1752,7 +1754,8 @@ focusFail:'Failed to switch window: ',
  resFull:'Fullscreen (borderless)',
  grpNative:'Supported by this display',
  grpCommon:'Common resolutions',
- langBtn:'中文'
+ langBtn:'中文',
+ buildLbl:'build'
 }
 };
 let LANG='zh';
@@ -1783,6 +1786,8 @@ try{return JSON.parse(txt)}catch(e){return {ok:false,error:t('badResp')+' (HTTP 
 }
 function msg(t2,cls){const m=document.getElementById('msg');m.textContent=t2||'';m.className=cls||''}
 function applyStatus(s){
+const vb=document.getElementById('ver');
+if(vb)vb.textContent=(s&&s.build)?(t('buildLbl')+' '+s.build):'';
 const b=document.getElementById('banner');
 if(s&&s.admin===false){b.style.display='block';b.textContent=t('bannerNoAdmin')}else{b.style.display='none'}
 const fix=document.getElementById('btnFix');
@@ -2009,6 +2014,20 @@ else{clearTimeout(shotTimer)}
 })();
 </script></body></html>"""
 
+def _build_stamp():
+    """这一份程序是什么时候打出来的。
+
+    单文件 exe 的 mtime 就是打包时间；开发态退回源码文件的时间。界面上显示
+    它，是为了让「改了没生效 / 是不是没更新」这类问题一眼能答——不用再翻
+    exe 的时间戳去比对。
+    """
+    try:
+        p = sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
+        return time.strftime('%m-%d %H:%M', time.localtime(os.path.getmtime(p)))
+    except Exception:
+        return ''
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -2018,6 +2037,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
         self.end_headers()
         self.wfile.write(body)
 
@@ -2046,7 +2067,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'admin': _is_admin(), 'rdp_hijacked': rdp_hijacked(),
                         'admin_default': admin_default(), 'lang': _lang(),
                         'resolution': resolution(),
-                        'modes': modes, 'common': _common_resolutions(modes)})
+                        'modes': modes, 'common': _common_resolutions(modes),
+                        'build': _build_stamp()})
         else:
             self.send_error(404)
 
