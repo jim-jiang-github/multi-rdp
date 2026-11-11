@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """简易用户管理 Web UI：注册 / 登录(RDP) / 删除。仅监听 127.0.0.1。"""
-import atexit, ctypes, json, os, random, re, shlex, shutil, string, subprocess, sys, threading, time, webbrowser
+import atexit, ctypes, json, os, random, re, shlex, shutil, string, subprocess, sys, threading, time, webbrowser, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8123
@@ -466,6 +466,11 @@ _kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
 _kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
 _kernel32.WaitForSingleObject.restype = ctypes.c_ulong
 _user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+# 类名/子控件/发消息：mstsc 那边要点掉「自签名证书」提示框，靠这几个原生调用。
+_user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+_user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_size_t]
+_user32.SendMessageW.restype = ctypes.c_void_p
+_user32.EnumChildWindows.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
 
 
 def _keep_alive():
@@ -655,8 +660,13 @@ def _client_window(name, key=None):
         if ent.get('hwnd'):
             return ent['hwnd'], pid
         wins = _top_windows(pid)
-        # SDL/FreeRDP 会顺手建几个不可见的辅助窗口，优先挑屏幕上真看得见的那个
-        wins.sort(key=lambda w: 0 if _user32.IsWindowVisible(w[0]) else 1)
+        # SDL/FreeRDP 会顺手建几个不可见的辅助窗口；mstsc 还多出进度框、输入法窗口。
+        # 优先挑 TscShellContainerClass（真正显示远程桌面的那个），其次才是可见的。
+        def _rank(w):
+            cls = (_class_of(w[0]) or '').lower()
+            return (0 if cls == 'tscshellcontainerclass' else 1,
+                    0 if _user32.IsWindowVisible(w[0]) else 1)
+        wins.sort(key=_rank)
         if wins:
             return wins[0][0], pid
         return 0, pid
@@ -764,8 +774,135 @@ def _hide_when_ready(key, proc):
         time.sleep(0.25)
 
 
+# ------------------------------------------------------------------ mstsc 后端
+# FreeRDP 3.32 在 Windows 26H1 上收到「脏」的快路径位图会崩（上游 #13883，3.33 才修），
+# 换微软自家的 mstsc 可以整个绕开这套解码路径。mstsc 不能从命令行收账号密码，只能：
+#   1) 先把密码写进 Windows 凭据库：cmdkey /generic:TERMSRV/<host> /user /pass
+#   2) 再 mstsc /v:<host> /w /h
+# 凭据是按「主机名」存的，所有账号都连 127.0.0.1 会互相覆盖，所以按账号名散列出
+# 一个固定的回环别名（127.0.0.0/8 整段都通到本机，效果与 127.0.0.1 完全相同）。
+def _backend():
+    return str(_load_cfg().get('backend') or 'freerdp').strip().lower()
+
+
+def _mstsc_host(name):
+    return '127.0.0.%d' % (2 + zlib.crc32(name.lower().encode('utf-8')) % 200)
+
+
+def _class_of(hwnd):
+    if not hwnd:
+        return ''
+    buf = ctypes.create_unicode_buffer(128)
+    _user32.GetClassNameW(hwnd, buf, 128)
+    return buf.value
+
+
+def _all_windows(pid):
+    """和 _top_windows 一样，但**不跳过有 owner 的窗口**——提示框都是 owner 窗口。"""
+    out = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+    def _cb(hwnd, _lp):
+        p = ctypes.c_ulong()
+        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+        if p.value == pid:
+            out.append((hwnd, p.value, ''))
+        return 1
+
+    _user32.EnumWindows(_cb, None)
+    return out
+
+
+def _child_windows(hwnd):
+    out = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    def _cb(h, _lp):
+        n = _user32.GetWindowTextLengthW(h)
+        buf = ctypes.create_unicode_buffer(n + 1)
+        _user32.GetWindowTextW(h, buf, n + 1)
+        out.append((h, buf.value))
+        return True
+
+    _user32.EnumChildWindows(hwnd, _cb, None)
+    return out
+
+
+def _mstsc_login(host, name, pwd):
+    """把账号密码写进凭据库；同一个 host 重复写会覆盖，所以每个账号要用不同 host。"""
+    rc, out = _run(['cmdkey', '/generic:TERMSRV/' + host, '/user:' + name, '/pass:' + pwd])
+    if rc != 0:
+        _log('mstsc 写凭据失败 %s: %s' % (host, out.strip()[:120]))
+    return rc == 0
+
+
+def _click_cert_dialog(pid, seconds=50):
+    """点掉 mstsc 的「证书不可信」提示：先勾「不再询问」，再点「是」。
+
+    只认 mstsc 自己进程里、且文字确实提到 certificate 的 #32770 对话框，
+    别的窗口一律不动，避免误点。
+    """
+    BM_CLICK, BM_GETCHECK = 0x00F5, 0x00F0
+    end = time.time() + seconds
+    while time.time() < end:
+        time.sleep(1.0)
+        try:
+            for h, _p, _t in _all_windows(pid):
+                if _class_of(h) != '#32770':
+                    continue
+                low = [(c, (t or '').lower()) for c, t in _child_windows(h)]
+                if not any('certificat' in t for _c, t in low):
+                    continue
+                dont = yes = 0
+                for c, t in low:
+                    flat = t.replace('&', '')
+                    if flat.startswith("don't ask me again"):
+                        dont = c
+                    elif flat in ('yes', '是'):
+                        yes = c
+                if dont:
+                    try:
+                        if _user32.SendMessageW(dont, BM_GETCHECK, 0, 0) == 0:
+                            _user32.SendMessageW(dont, BM_CLICK, 0, 0)
+                            time.sleep(0.2)
+                    except Exception:
+                        pass
+                if yes:
+                    _user32.SendMessageW(yes, BM_CLICK, 0, 0)
+                    _log('mstsc 证书提示已确认（pid %s）' % pid)
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def _spawn_mstsc(info, hidden=False):
+    """拉起 mstsc 连本机回环。"""
+    w, h = _rdp_geometry()
+    host = _mstsc_host(info['name'])
+    _mstsc_login(host, info['name'], info['password'])
+    args = ['mstsc.exe', '/v:' + host]
+    if w and h:
+        args += ['/w:%d' % w, '/h:%d' % h]
+    si = None
+    if hidden:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = SW_HIDE
+    logf = open(os.path.join(BASE_DIR, 'client.log'), 'ab')
+    proc = subprocess.Popen(
+        args, cwd=os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32'),
+        stdout=logf, stderr=logf, startupinfo=si,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    threading.Thread(target=_click_cert_dialog, args=(proc.pid,), daemon=True).start()
+    _log('mstsc 启动 %s -> %s (%sx%s)' % (info['name'], host, w or 0, h or 0))
+    return proc
+
+
 def _spawn_client(info, hidden=False):
-    """拉起 FreeRDP 客户端，返回 Popen（失败返回 None）。"""
+    """拉起远程客户端，返回 Popen（失败返回 None）。"""
+    if _backend() == 'mstsc':
+        return _spawn_mstsc(info, hidden=hidden)
     pwd = info['password']
     exe = _freerdp_exe()
     if not exe:
