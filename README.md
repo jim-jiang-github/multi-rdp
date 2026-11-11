@@ -9,16 +9,6 @@
 并通过**系统托盘常驻**的小工具统一管理。适合在一台电脑上同时跑多个隔离环境（游戏多开、
 测试环境、给家人/同事开独立桌面等）的场景。
 
-## ☕ 请作者喝杯咖啡
-
-如果这个工具帮到了你，欢迎扫码请杯咖啡（金额随意，心意最重要）：
-
-<p align="center">
-  <img src="docs/donate_wechat.jpg" width="300" alt="微信支付收款码">
-  &nbsp;&nbsp;&nbsp;
-  <img src="docs/donate_alipay.jpg" width="300" alt="支付宝收款码">
-</p>
-
 ![Web UI 截图](docs/screenshot_webui.png)
 
 > 界面右上角「English / 中文」可实时切换语言（英文界面效果见
@@ -193,6 +183,16 @@ cmdkey /list | findstr TERMSRV/127.0.0.
 
 Python 3（标准库 `http.server` + `ctypes`/`winreg`）、pystray + Pillow（托盘）、
 PyInstaller（打包）、mstsc（Windows 自带远程桌面客户端）；TermWrap 多会话补丁直接使用预编译 dll。
+
+## ☕ 请作者喝杯咖啡
+
+如果这个工具帮到了你，欢迎扫码请杯咖啡（金额随意，心意最重要）：
+
+<p align="center">
+  <img src="docs/donate_wechat.jpg" width="300" alt="微信支付收款码">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/donate_alipay.jpg" width="300" alt="支付宝收款码">
+</p>
 
 ## License
 

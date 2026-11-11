@@ -7,17 +7,6 @@ window, and manage everything from a **system-tray resident** app. Built for run
 isolated environments on a single PC — game multi-boxing, test environments, giving family or
 colleagues their own desktop, and so on.
 
-## ☕ Buy me a coffee
-
-If this tool made your life easier, feel free to scan a QR code and buy the author a coffee
-(any amount is appreciated — it's the thought that counts):
-
-<p align="center">
-  <img src="docs/donate_wechat.jpg" width="300" alt="WeChat Pay QR code">
-  &nbsp;&nbsp;&nbsp;
-  <img src="docs/donate_alipay.jpg" width="300" alt="Alipay QR code">
-</p>
-
 ![Web UI screenshot](docs/screenshot_webui_en.png)
 
 > The button at the top right switches between English and Chinese instantly
@@ -210,6 +199,17 @@ confirm it manually once - it stays silent afterwards too.
 Python 3 (stdlib `http.server` + `ctypes`/`winreg`), pystray + Pillow (tray), PyInstaller
 (packaging), mstsc (the remote desktop client built into Windows); the TermWrap multi-session patch
 ships as a prebuilt dll.
+
+## ☕ Buy me a coffee
+
+If this tool made your life easier, feel free to scan a QR code and buy the author a coffee
+(any amount is appreciated — it's the thought that counts):
+
+<p align="center">
+  <img src="docs/donate_wechat.jpg" width="300" alt="WeChat Pay QR code">
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/donate_alipay.jpg" width="300" alt="Alipay QR code">
+</p>
 
 ## License
 
