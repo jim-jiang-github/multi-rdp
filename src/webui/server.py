@@ -1616,7 +1616,7 @@ button:disabled{opacity:.5;cursor:default}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(292px,1fr));gap:16px}
 .ucard{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(20,20,50,.05);display:flex;flex-direction:column;transition:box-shadow .18s,border-color .18s}
 .ucard:hover{box-shadow:0 6px 18px rgba(20,20,50,.10);border-color:#d8dbe9}
-.shot{position:relative;aspect-ratio:16/10;background:#0e1522;cursor:pointer;overflow:hidden}
+.shot{position:relative;aspect-ratio:var(--shot-ar,16/10);background:#0e1522;cursor:pointer;overflow:hidden}
 .shot img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .3s}
 .shot img.ready{opacity:1}
 .shot .ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#6b7590;font-size:12.5px;text-align:center;padding:0 18px;line-height:1.5}
@@ -1644,7 +1644,7 @@ button:disabled{opacity:.5;cursor:default}
 .empty{color:var(--sub);text-align:center;padding:28px 0;font-size:14px;grid-column:1/-1}
 .newcard{border-style:dashed;border-color:#ccd3e6;background:rgba(255,255,255,.55)}
 .newcard:hover{border-color:#9fa9c6;background:#fff;box-shadow:0 6px 18px rgba(20,20,50,.08)}
-.newshot{width:100%;height:auto;flex:0 0 auto;aspect-ratio:16/10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:0;background:transparent;border-radius:0;color:var(--sub);cursor:pointer}
+.newshot{width:100%;height:auto;flex:0 0 auto;aspect-ratio:var(--shot-ar,16/10);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:0;background:transparent;border-radius:0;color:var(--sub);cursor:pointer}
 .newshot .plus{width:62px;height:62px;border-radius:50%;border:2px dashed #b8c1d8;display:flex;align-items:center;justify-content:center;font-size:35px;font-weight:300;line-height:1;color:#8d97b4;padding-bottom:4px;transition:transform .18s,color .18s,border-color .18s}
 .newcard:hover .plus{border-style:solid;border-color:var(--brand);color:var(--brand);transform:scale(1.06)}
 .newlbl{font-size:13px;font-weight:500}
@@ -1915,6 +1915,19 @@ const c={name:name,el:el,shot:el.querySelector('.shot'),img:el.querySelector('im
 ph:el.querySelector('.ph'),pht:el.querySelector('.pht'),veil:el.querySelector('.veil'),
 badge:el.querySelector('.badge'),stamp:el.querySelector('.stamp'),
 acts:el.querySelector('.acts'),adm:el.querySelector('.adm'),nm:el.querySelector('.nm'),user:null};
+/* 帧子（.shot）的宽高比跟着画面走：远程桌面是 1280x800 还是 1680x1050、
+   窗口被拖成什么形状，缩略图就长什么样，不再用 16:10 的框去 cover 裁一刀。*/
+c.img.addEventListener('load',function(){
+const w=c.img.naturalWidth,h=c.img.naturalHeight;
+if(!w||!h)return;
+const ar=w/h;
+if(!(ar>0.4&&ar<4))return;
+if(c.shot.dataset.ar&&Math.abs(parseFloat(c.shot.dataset.ar)-ar)<0.005)return;
+c.shot.dataset.ar=ar;
+c.shot.style.aspectRatio=ar;
+const root=document.documentElement;
+if(!root.dataset.sar){root.dataset.sar='1';root.style.setProperty('--shot-ar',ar)}
+});
 cards[name]=c;
 return c;
 }
