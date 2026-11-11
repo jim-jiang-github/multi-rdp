@@ -7,6 +7,15 @@ window, and manage everything from a **system-tray resident** app. Built for run
 isolated environments on a single PC — game multi-boxing, test environments, giving family or
 colleagues their own desktop, and so on.
 
+## ☕ Buy me a coffee
+
+If this tool made your life easier, feel free to scan a QR code and buy the author a coffee
+(any amount is appreciated — it's the thought that counts):
+
+| WeChat Pay | Alipay |
+|:---:|:---:|
+| ![WeChat Pay QR code](docs/donate_wechat.jpg) | ![Alipay QR code](docs/donate_alipay.jpg) |
+
 ![Web UI screenshot](docs/screenshot_webui_en.png)
 
 > The button at the top right switches between English and Chinese instantly
