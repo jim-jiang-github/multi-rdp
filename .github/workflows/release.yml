@@ -131,7 +131,7 @@ jobs:
           2. 托盘图标右键 → **打开 Web UI**（默认 http://127.0.0.1:8123）
           3. 网页里新建账号，卡片会显示各会话的实时缩略图；点卡片把窗口切到前台
 
-          `users.json` / `config.json` / `aliases.json` 自动生成在 exe 同目录，升级时只替换 exe，配置和缩略图都留着。
+          `users.json` / `config.json` / `aliases.json` 等运行数据放在 `%LOCALAPPDATA%\MultiRDP`：exe 可以随便挪、覆盖升级，账号不会跟着丢。托盘菜单里有「打开数据目录」。
 
           **环境**：Windows 10/11 x64。不需要装 FreeRDP 或 .NET，系统自带 mstsc 即可。
 

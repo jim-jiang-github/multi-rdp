@@ -71,7 +71,7 @@ _cache_lock = threading.Lock()
 _gate = threading.Semaphore(2)      # 同时最多两个 GDI 抓屏，避免一屏 30 张卡把 CPU 打满
 
 # 最后一帧：会话断了 / 窗口被藏了 / 程序重启过，卡片上都还留着断开前那张画面。
-# 内存一份（快），磁盘一份（重启后还在，放在 exe 旁边的 thumbs/）。
+# 内存一份（快），磁盘一份（重启后还在，放在用户数据目录的 thumbs/ 下）。
 _last = {}                  # name -> (ts, jpeg_bytes)
 _disk_dir = ''              # 由 server 启动时调 set_cache_dir() 设置
 _disk_wrote = {}            # name -> ts，写盘节流用

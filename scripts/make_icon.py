@@ -52,13 +52,16 @@ def _rounded_mask(size, radius):
 
 
 def _monitor(size, bezel, hi, screen, screen_hi, radius_ratio=0.235,
-             bezel_ratio=0.14):
-    """画一个显示器字形（屏幕 + 底座），返回 RGBA，边长 size。"""
+             bezel_ratio=0.14, stand=True):
+    """画一个显示器字形（屏幕 + 底座），返回 RGBA，边长 size。
+
+    stand=False 时不画底座：小尺寸（32px 以下）底座只剩 1px，画了反而糊。
+    """
     w = h = size
     img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    body_h = int(h * 0.80)                      # 屏幕本体高度，底部留给底座
+    body_h = int(h * 0.80) if stand else h - 1   # 屏幕本体高度，底部留给底座
     r = int(w * radius_ratio)
     bw = max(2, int(w * bezel_ratio))           # 边框粗细
     d.rounded_rectangle([0, 0, w - 1, body_h], radius=r, fill=bezel + (255,))
@@ -77,6 +80,9 @@ def _monitor(size, bezel, hi, screen, screen_hi, radius_ratio=0.235,
                                          fill=255)
     img.paste(grad, (inner_box[0], inner_box[1]), gm)
 
+    if not stand:
+        return img
+
     # 底座：短颈 + 底板（比之前更宽更实）
     neck_w = int(w * 0.13)
     neck_h = int(h * 0.05)
@@ -92,53 +98,92 @@ def _monitor(size, bezel, hi, screen, screen_hi, radius_ratio=0.235,
     return img
 
 
-def build_master():
-    S = MASTER * SS
-    # 背景
+def _grid(size, cols, rows, mon_frac, gap_x_frac, gap_y_frac, stand=True,
+          glow=False):
+    """画 cols x rows 的显示器矩阵，输出 size x size 的 RGBA。
+
+    mon_frac 是单个显示器宽度占画布的比例；各行的最后一台高亮成青绿色
+    （代表当前活跃的那个会话）。
+    """
+    S = size * SS
     img = _vgrad((S, S), BG_TOP, BG_BOT).convert('RGBA')
 
-    # 顶部柔光
-    glow = Image.new('RGBA', (S, S), (0, 0, 0, 0))
-    ImageDraw.Draw(glow).ellipse([-S * 0.25, -S * 0.55, S * 1.25, S * 0.45],
-                                 fill=(90, 150, 220, 46))
-    glow = glow.filter(ImageFilter.GaussianBlur(S * 0.06))
-    img = Image.alpha_composite(img, glow)
+    if glow:                        # 顶部柔光（只有大尺寸才需要，小图标会被糊掉）
+        g = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+        ImageDraw.Draw(g).ellipse([-S * 0.25, -S * 0.55, S * 1.25, S * 0.45],
+                                  fill=(90, 150, 220, 46))
+        img = Image.alpha_composite(img, g.filter(ImageFilter.GaussianBlur(S * 0.06)))
 
-    # 网格几何
-    cols, rows = 3, 2
-    mon_w = int(S * 0.272)          # 单个显示器宽度（含底座高度约 1.1 倍）
-    gap_x = int(S * 0.052)
-    gap_y = int(S * 0.058)
+    mon_w = int(S * mon_frac)
+    gap_x = int(S * gap_x_frac)
+    gap_y = int(S * gap_y_frac)
     grid_w = cols * mon_w + (cols - 1) * gap_x
     x0 = (S - grid_w) // 2
-    cell_h = int(mon_w * 1.0)       # 屏幕+底座的视觉高度
+    cell_h = mon_w
     grid_h = rows * cell_h + (rows - 1) * gap_y
     y0 = (S - grid_h) // 2
 
     for row in range(rows):
         for col in range(cols):
-            active = (row == 0 and col == 2)
+            active = (row == 0 and col == cols - 1)
             bezel = ACTIVE if active else BEZEL
             hi = ACTIVE_HI if active else BEZEL_HI
-            mon = _monitor(mon_w, bezel, hi, SCREEN, SCREEN_HI)
+            mon = _monitor(mon_w, bezel, hi, SCREEN, SCREEN_HI, stand=stand)
             x = x0 + col * (mon_w + gap_x)
             y = y0 + row * (cell_h + gap_y)
-            if active:
+            if active and glow:
                 # 外发光
                 halo = Image.new('RGBA', (S, S), (0, 0, 0, 0))
                 halo.paste(mon, (x, y), mon)
                 halo = halo.filter(ImageFilter.GaussianBlur(S * 0.022))
-                # 提高发光亮度
                 halo = Image.eval(halo, lambda v: min(255, int(v * 1.25)))
                 img = Image.alpha_composite(img, halo)
             img.alpha_composite(mon, (x, y))
 
     # 圆角裁切
-    radius = int(S * 0.225)
-    mask = _rounded_mask((S, S), radius)
+    mask = _rounded_mask((S, S), int(S * 0.225))
     out = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     out.paste(img, (0, 0), mask)
-    return out.resize((MASTER, MASTER), Image.LANCZOS)
+    return out.resize((size, size), Image.LANCZOS)
+
+
+def build_master():
+    """主图：3x2 六显示器，右上那台高亮。48px 以上用这张。"""
+    return _grid(MASTER, 3, 2, 0.272, 0.052, 0.058, stand=True, glow=True)
+
+
+def build_quad(size):
+    """32px：3x2 缩到 32px 会糊成六个点，改成 2x2、去掉底座。"""
+    return _grid(size, 2, 2, 0.35, 0.09, 0.10, stand=False)
+
+
+def build_small(size):
+    """16/24px：只画一块屏，右上角点一颗绿点表示「活跃会话」。
+
+    尺寸这么小时，元素越少越清楚——三行六屏在这个尺度上没有意义。
+    """
+    S = size * SS
+    img = _vgrad((S, S), BG_TOP, BG_BOT).convert('RGBA')
+    mask = _rounded_mask((S, S), int(S * 0.235))
+    out = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    out.paste(img, (0, 0), mask)
+    img = out
+
+    d = ImageDraw.Draw(img)
+    b = int(S * 0.10)                                 # 边框粗细
+    r = int(S * 0.13)
+    body = (S * 0.13, S * 0.20, S * 0.87, S * 0.62)
+    d.rounded_rectangle(body, radius=r, fill=BEZEL + (255,))
+    d.rounded_rectangle([body[0] + b, body[1] + b, body[2] - b, body[3] - b],
+                        radius=int(r * 0.55), fill=SCREEN + (255,))
+    # 底座
+    d.rectangle([S * 0.46, body[3] - 1, S * 0.54, S * 0.72], fill=BEZEL + (255,))
+    d.rounded_rectangle([S * 0.32, S * 0.70, S * 0.68, S * 0.78],
+                        radius=int(S * 0.022), fill=BEZEL + (255,))
+    # 右上角活跃指示灯（往里挪一点，别被圆角切掉）
+    d.rounded_rectangle([S * 0.645, S * 0.135, S * 0.79, S * 0.275],
+                        radius=int(S * 0.022), fill=ACTIVE + (255,))
+    return img.resize((size, size), Image.LANCZOS)
 
 
 def build_tray(size=64):
@@ -178,10 +223,21 @@ def main():
     master.save(png)
     print('wrote', png, master.size)
 
+    # 每个尺寸单独画：16/24 单屏、32 2x2、48 以上 3x2。
+    # 关键点：小尺寸必须用 BMP(DIB) 编码——PNG 编码的 ICO 条目在资源管理器里
+    # 渲染不出来，exe 会显示成系统的通用图标。
     ico = os.path.join(OUT, 'multirdp.ico')
     sizes = [256, 128, 64, 48, 32, 24, 16]
-    frames = [master.resize((s, s), Image.LANCZOS) for s in sizes]
-    frames[0].save(ico, format='ICO', sizes=[(s, s) for s in sizes])
+    frames = []
+    for s in sizes:
+        if s <= 24:
+            frames.append(build_small(s))
+        elif s <= 32:
+            frames.append(build_quad(s))
+        else:
+            frames.append(master.resize((s, s), Image.LANCZOS))
+    frames[0].save(ico, format='ICO', sizes=[(s, s) for s in sizes],
+                   append_images=frames[1:], bitmap_format='bmp')
     print('wrote', ico, 'sizes', sizes)
 
     tray = build_tray(64)

@@ -4,6 +4,7 @@
 后台运行用户管理 Web UI（server.py），在系统托盘提供图标菜单：
   - 打开 Web UI
   - 新用户默认授予管理员（勾选项，写入 config.json）
+  - 打开数据目录（%LOCALAPPDATA%\\MultiRDP）
   - 退出
 
 打包：scripts/build.bat 会用 PyInstaller 把本文件打成单 exe（MultiRDP.exe）。
@@ -80,6 +81,14 @@ def _open_webui(icon=None, item=None):
     webbrowser.open('http://127.0.0.1:%d' % server_mod.PORT)
 
 
+def _open_data_dir(icon=None, item=None):
+    """打开 %LOCALAPPDATA%\\MultiRDP：users.json / config.json / thumbs 都在这里。"""
+    try:
+        os.startfile(server_mod.BASE_DIR)
+    except Exception:
+        webbrowser.open('file:///' + server_mod.BASE_DIR.replace('\\', '/'))
+
+
 def _admin_default_checked(item):
     return bool(server_mod.admin_default())
 
@@ -131,6 +140,7 @@ def main():
         pystray.MenuItem('新用户默认授予管理员', _toggle_admin_default,
                          checked=_admin_default_checked),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem('打开数据目录', _open_data_dir),
         pystray.MenuItem('退出', _on_exit),
     )
     icon = pystray.Icon('MultiRDP', _icon_image(), 'MultiRDP - 多用户 RDP 管理', menu)

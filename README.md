@@ -44,7 +44,7 @@
   推流——只在网页处于前台时每 6 秒抓一帧（`PrintWindow`，窗口被别的窗口挡住也能截到），
   切到别的标签页就自动停，几乎不占 CPU。画面按原比例整体缩进卡片，比例对不上就留黑边，
   不裁不拉伸。点缩略图即可把那个远程窗口切到前台；窗口隐藏时显示隐藏前那一帧，会话断开后
-  继续显示断开前最后一帧（存在 exe 旁边的 `thumbs/`，程序重启后还在）
+  继续显示断开前最后一帧（存在 `%LOCALAPPDATA%\MultiRDP\thumbs\`，程序重启后还在）
 - **孤儿目录扫描**：本工具生成的随机用户名目录若残留，会重新列在界面上供清理
 - **修复登录白屏**：检测 OpenStreamMS 是否劫持了 RDP 图形管线
   （`RDP-Tcp\LoadableProtocol_Object`），一键还原为微软原版协议
@@ -76,9 +76,15 @@ scripts\build.bat
 1. 双击 `dist\MultiRDP.exe`（自动请求管理员权限），程序驻留托盘
 2. 托盘右键 → 打开 Web UI
 
-图标由 `scripts/make_icon.py` 矢量绘制（超采样后降采样，16px 不发糊），`build.bat`
-每次打包前自动重新生成 `assets/multirdp.ico` 与 `assets/tray.png`；构建参数集中在
-`MultiRDP.spec`。想换配色或改格子数量，改脚本里的常量重跑即可。
+运行数据（`users.json` / `config.json` / `aliases.json` / `clients.json` / `thumbs/`）统一放在
+`%LOCALAPPDATA%\MultiRDP`：exe 可以随便挪目录、覆盖升级，数据不会跟着丢；托盘菜单里的
+「打开数据目录」直接跳过去。从旧版本升级时，exe 旁边的旧数据会在首次启动时自动搬过去
+（只搬没有的，不会盖掉新数据）。
+
+图标由 `scripts/make_icon.py` 矢量绘制（超采样后降采样），并按尺寸换画法——16/24px 只画
+一块屏、32px 画 2x2、48px 以上画 3x2，小图标才不至于糊成几个点；`build.bat` 每次打包前
+自动重新生成 `assets/multirdp.ico` 与 `assets/tray.png`；构建参数集中在 `MultiRDP.spec`。
+想换配色或改格子数量，改脚本里的常量重跑即可。
 
 ### 方式三：直接跑 Python
 
@@ -206,7 +212,7 @@ cmdkey /list | findstr TERMSRV/127.0.0.
   黑边，不削的话卡片上看着就是「中间一小块画面」）；剩下比例上的差异由卡片自己补黑边，
   画面始终完整、不变形
 - 会话断开 / 窗口被隐藏 / 程序重启过，卡片都还会显示最后一张画面（时间戳停在那一刻），
-  最后一帧存在 `thumbs/<账号>.jpg`，删账号时一并清掉
+  最后一帧存在 `%LOCALAPPDATA%\MultiRDP\thumbs\<账号>.jpg`，删账号时一并清掉
 
 ### 为什么不用 FreeRDP（历史）
 

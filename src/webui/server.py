@@ -10,15 +10,34 @@ except ImportError:                          # python src/webui/server.py 直接
 
 PORT = 8123
 HERE = os.path.dirname(os.path.abspath(__file__))
-# PyInstaller 打包成单 exe 后，users.json / config.json 等数据文件
-# 放在 exe 同目录下（可写），而不是解包临时目录里。
-if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
-else:
-    BASE_DIR = HERE
+FROZEN = getattr(sys, 'frozen', False)
+# exe 所在目录（打包态）/ 仓库 src 目录（开发态）。只用来找随包资源、当子进程的 cwd，
+# 不放用户数据。
+EXE_DIR = os.path.dirname(os.path.abspath(sys.executable)) if FROZEN else HERE
+
+
+def _data_dir():
+    """用户数据目录：%LOCALAPPDATA%\\MultiRDP。
+
+    以前是放在 exe 同目录的，两个问题：exe 装到 Program Files 这类只读位置就写不进去；
+    升级时换个 exe 容易连 users.json 一起删掉。开发态（python src/webui/server.py）
+    还是就地读写仓库，调试时不用去 AppData 里翻文件。
+    """
+    if not FROZEN:
+        return HERE
+    base = os.environ.get('LOCALAPPDATA') or os.path.join(
+        os.path.expanduser('~'), 'AppData', 'Local')
+    return os.path.join(base, 'MultiRDP')
+
+
+BASE_DIR = _data_dir()
+try:
+    os.makedirs(BASE_DIR, exist_ok=True)
+except OSError:
+    pass
 USERS_FILE = os.path.join(BASE_DIR, 'users.json')
 CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
-# 卡片上的「最后画面」落盘在 exe 旁边，程序重启后卡片照样有图
+# 卡片上的「最后画面」落盘，程序重启后卡片照样有图
 thumb.set_cache_dir(os.path.join(BASE_DIR, 'thumbs'))
 RDP_GROUP = 'Remote Desktop Users'
 ADMIN_GROUP = 'Administrators'
@@ -509,6 +528,62 @@ def _log(msg):
             f.write('[%s] %s\n' % (time.strftime('%Y-%m-%d %H:%M:%S'), msg))
     except OSError:
         pass
+
+
+# 老版本写在 exe 旁边的那批数据；换到 %LOCALAPPDATA% 之后第一次启动搬过去
+_LEGACY_FILES = ('users.json', 'config.json', 'aliases.json', 'clients.json',
+                 'client.log', 'rdp_repair_backup.json', 'termwrap_backup.json')
+
+
+def _migrate_legacy():
+    """把 exe 旁边的旧数据搬到新的用户数据目录。
+
+    只搬「目标不存在」的文件，已有的绝不覆盖（否则新数据会被旧数据盖掉）；
+    move 不成就 copy，copy 也不成就跳过——不能让用户因为迁移失败打不开程序。
+    """
+    if BASE_DIR == EXE_DIR:
+        return
+    moved = []
+    for n in _LEGACY_FILES:
+        src = os.path.join(EXE_DIR, n)
+        dst = os.path.join(BASE_DIR, n)
+        if not os.path.isfile(src) or os.path.exists(dst):
+            continue
+        try:
+            shutil.move(src, dst)
+            moved.append(n)
+        except OSError:
+            try:
+                shutil.copy2(src, dst)
+                moved.append(n + '(copy)')
+            except OSError:
+                pass
+
+    src_dir = os.path.join(EXE_DIR, 'thumbs')
+    dst_dir = os.path.join(BASE_DIR, 'thumbs')
+    if os.path.isdir(src_dir):
+        try:
+            os.makedirs(dst_dir, exist_ok=True)
+        except OSError:
+            dst_dir = ''
+        if dst_dir:
+            for f in os.listdir(src_dir):
+                s = os.path.join(src_dir, f)
+                d = os.path.join(dst_dir, f)
+                if os.path.isfile(s) and not os.path.exists(d):
+                    try:
+                        shutil.move(s, d)
+                        moved.append('thumbs/' + f)
+                    except OSError:
+                        pass
+
+    if moved:
+        _log('运行数据迁移到 %s（%d 个文件）：%s'
+             % (BASE_DIR, len(moved), ', '.join(moved[:10])))
+
+
+if FROZEN:
+    _migrate_legacy()
 
 
 def _pid_running(pid):
@@ -2283,7 +2358,7 @@ def _try_elevate():
         if getattr(sys, 'frozen', False):
             # 打包成 exe 后：直接以管理员重启 exe 本身
             rc = ctypes.windll.shell32.ShellExecuteW(
-                None, 'runas', sys.executable, None, BASE_DIR, 1)
+                None, 'runas', sys.executable, None, EXE_DIR, 1)
         else:
             rc = ctypes.windll.shell32.ShellExecuteW(
                 None, 'runas', sys.executable,

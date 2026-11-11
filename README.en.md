@@ -53,7 +53,7 @@ colleagues their own desktop, and so on.
   tab goes to the background. The frame is scaled down as a whole and letterboxed instead of being
   cropped or stretched. Click a thumbnail to bring that remote window to the front; a hidden window
   keeps the last frame, and a disconnected session keeps showing the frame from just before it
-  dropped (cached in `thumbs/` next to the exe, so it survives a restart)
+  dropped (cached in `%LOCALAPPDATA%\MultiRDP\thumbs\`, so it survives a restart)
 - **Orphan folder scan** — leftover profile folders created by this tool are re-listed so they
   can be cleaned up
 - **White-screen repair** — detects whether OpenStreamMS hijacked the RDP graphics pipeline
@@ -87,6 +87,12 @@ the `mstsc.exe` that ships with Windows, so nothing else has to be copied. First
 
 1. Double-click `dist\MultiRDP.exe` (it requests administrator rights) — it stays in the tray
 2. Right-click the tray icon → Open Web UI
+
+Runtime data (`users.json`, `config.json`, `aliases.json`, `clients.json`, `thumbs/`) lives in
+`%LOCALAPPDATA%\MultiRDP`, not next to the exe: you can move the exe around or overwrite it when
+upgrading without touching your accounts. The tray menu has **Open data folder** for it. Files left
+next to an exe by an older version are moved over automatically on first start (existing files are
+never overwritten).
 
 ### Option 3 — plain Python
 
