@@ -1877,7 +1877,7 @@ button:disabled{opacity:.5;cursor:default}
 </style></head><body>
 <div class="wrap">
 <div class="top">
-<div><h1 id="ttl">用户管理</h1><div class="sub" id="sub"></div><div class="ver" id="ver"></div></div>
+<div><div class="ver" id="ver"></div></div>
 <button class="ghost langbtn" id="btnLang" onclick="toggleLang()">English</button>
 </div>
 <div id="banner"></div>
@@ -1908,7 +1908,6 @@ button:disabled{opacity:.5;cursor:default}
 const I18N={
 zh:{
  title:'用户管理',
- subtitle:'点一下自动创建一个独立账号，密码由程序随机生成并保存',
  btnNew:'新建账号',
  newTip:'点击创建新账号，账号和密码自动生成',
  chkAdminTip:'勾选后新账号加入管理员组：启动需要管理员的程序（如游戏启动器）时 UAC 只需点「是」，不用输管理员密码',
@@ -1925,7 +1924,6 @@ zh:{
  hide:'隐藏窗口',
  show:'显示窗口',
  hiding:'正在把窗口收进后台…',
- hideOk:'已收进后台：连接没断，会话保持激活（里面的窗口仍有焦点），点「显示窗口」随时回来',
  hideFail:'收进后台失败：',
  showOk:'窗口已恢复，桌面还是原来那个',
  showFail:'恢复窗口失败：',
@@ -1994,7 +1992,6 @@ focusFail:'切换窗口失败：',
 },
 en:{
  title:'User Management',
- subtitle:'Create an isolated local account in one click — the password is generated and saved automatically',
  btnNew:'New account',
  newTip:'Click to create a new account - username and password are generated for you',
  chkAdminTip:'Add new accounts to the Administrators group: programs that need elevation only ask for a Yes/No instead of an admin password',
@@ -2011,7 +2008,6 @@ en:{
  hide:'Hide window',
  show:'Show window',
  hiding:'Hiding the window…',
- hideOk:'Moved to background: the connection stays up, so the session is still Active (its windows keep focus). Click Show window to bring it back',
  hideFail:'Failed to hide: ',
  showOk:'Window restored - same desktop as before',
  showFail:'Failed to show the window: ',
@@ -2084,8 +2080,6 @@ function t(k,v){let s=(I18N[LANG]&&I18N[LANG][k])||I18N.zh[k]||k;if(v){for(const
 function applyI18n(){
 document.documentElement.lang=(LANG==='zh'?'zh-CN':'en');
 document.title=t('title');
-document.getElementById('ttl').textContent=t('title');
-document.getElementById('sub').textContent=t('subtitle');
 document.getElementById('newLbl').textContent=t('btnNew');
 document.getElementById('btnFix').textContent=t('btnFix');
 document.getElementById('chkAdminText').textContent=t('chkAdmin');
@@ -2405,7 +2399,7 @@ btn.disabled=false;
 async function hideWin(name){
 msg(t('hiding'));
 const r=await api('hide',{name:name});
-msg(r.ok?t('hideOk'):t('hideFail')+r.error,r.ok?'ok':'err');
+if(!r.ok)msg(t('hideFail')+r.error,'err');
 refresh();
 }
 async function showWin(name){
