@@ -1762,6 +1762,10 @@ button:disabled{opacity:.5;cursor:default}
 .shot .stamp{position:absolute;right:9px;bottom:8px;font-size:10.5px;color:rgba(230,236,248,.72);background:rgba(12,18,30,.5);padding:2px 7px;border-radius:99px}
 .shot .stamp:empty{display:none}
 .cbody{padding:12px 14px 14px;display:flex;flex-direction:column;gap:11px}
+/* 卡片内嵌提示（如创建成功），替代顶部全局绿字 */
+.cnote{display:none;font-size:12px;line-height:1.55;color:var(--ok);background:rgba(15,110,86,.08);border:1px solid rgba(15,110,86,.25);border-radius:9px;padding:7px 10px}
+.cnote.on{display:block;animation:cnotein .25s ease-out}
+@keyframes cnotein{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
 .cname{display:flex;align-items:center;gap:7px;font-weight:600;font-size:14px;min-width:0}
 .cname span.nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .acts{display:flex;gap:6px;flex-wrap:wrap}
@@ -1811,7 +1815,6 @@ button:disabled{opacity:.5;cursor:default}
 <div class="updprog" id="updProg"><i id="updBar"></i></div>
 </div>
 <div id="msg"></div>
-<div class="hint" id="shotHint" style="margin:0 0 12px 2px"></div>
 <div id="grid" class="grid"><div class="ucard newcard" id="newCard">
 <button class="newshot" id="btnNew" onclick="register()" title="点击创建新账号，账号和密码自动生成">
 <span class="plus">+</span><span class="newlbl" id="newLbl">新建账号</span>
@@ -1867,7 +1870,6 @@ shotHidden:'窗口已隐藏 · 点一下打开',
 shotOff:'会话已断开',
 shotWait:'等待画面…',
 shotTip:'点一下切到这个远程桌面',
-shotLive:'画面在后台标签页时暂停刷新',
 focusFail:'切换窗口失败：',
  bannerNoAdmin:'⚠ 当前没有管理员权限，创建/删除会失败。请以管理员身份重新运行本程序。',
  creating:'正在创建…',
@@ -1954,7 +1956,6 @@ shotHidden:'Window hidden · click to open',
 shotOff:'Session disconnected',
 shotWait:'Waiting for the screen…',
 shotTip:'Click to switch to this desktop',
-shotLive:'Preview pauses while this tab is in the background',
 focusFail:'Failed to switch window: ',
  bannerNoAdmin:'⚠ No administrator rights: creating/deleting users will fail. Please run this program as administrator.',
  creating:'Creating…',
@@ -2025,7 +2026,6 @@ document.getElementById('resFull').textContent=t('resFull');
 document.getElementById('grpNative').label=t('grpNative');
 document.getElementById('grpCommon').label=t('grpCommon');
 document.getElementById('btnLang').textContent=t('langBtn');
-document.getElementById('shotHint').textContent=t('shotLive');
 }
 async function api(path,body){
 try{
@@ -2182,12 +2182,13 @@ el.innerHTML='<div class="shot" onclick="focusUser(\''+name+'\')" title="'+t('sh
 '<span class="stamp"></span></div>'+
 '<div class="cbody"><div class="cname"><span class="nm"></span>'+
 '<span class="tag adm" style="display:none">'+t('admin')+'</span></div>'+
-'<div class="acts"></div></div>'+
+'<div class="acts"></div><div class="cnote"></div></div>'+
 '<div class="delover"><div class="deltxt"></div><div class="delbar"><i></i></div></div>';
 const c={name:name,el:el,shot:el.querySelector('.shot'),img:el.querySelector('img'),
 ph:el.querySelector('.ph'),pht:el.querySelector('.pht'),veil:el.querySelector('.veil'),
 badge:el.querySelector('.badge'),stamp:el.querySelector('.stamp'),
 acts:el.querySelector('.acts'),adm:el.querySelector('.adm'),nm:el.querySelector('.nm'),user:null,
+note:el.querySelector('.cnote'),
 delover:el.querySelector('.delover'),deltxt:el.querySelector('.deltxt'),
 delbar:el.querySelector('.delbar'),delbarI:el.querySelector('.delbar i')};
 cards[name]=c;
@@ -2308,17 +2309,27 @@ if(r&&r.ok){msg('')}else{msg(t('focusFail')+((r&&r.error)||''),'err')}
 refresh();
 }
 
+/* 卡片内嵌提示：替代顶部全局消息，归各卡片自己展示 */
+function note(c,text){
+if(!c)return;
+c.note.textContent=text;
+c.note.classList.add('on');
+if(c.noteTimer)clearTimeout(c.noteTimer);
+c.noteTimer=setTimeout(function(){c.note.classList.remove('on')},12000);
+}
 async function register(){
 const btn=document.getElementById('btnNew');
 btn.disabled=true;
 msg(t('creating'));
 try{
 const r=await api('register',{admin:document.getElementById('chkAdmin').checked});
-if(r.ok)msg(t(r.user.admin?'createdAdmin':'createdNormal',{name:r.user.name}),'ok');
-else msg(r.error,'err');
+if(r.ok){
+await refresh();
+note(cards[r.user.name],t(r.user.admin?'createdAdmin':'createdNormal',{name:r.user.name}));
+msg('');
+}else msg(r.error,'err');
 }catch(e){msg(t('requestFail')+e,'err')}
 btn.disabled=false;
-refresh();
 }
 async function hideWin(name){
 msg(t('hiding'));
