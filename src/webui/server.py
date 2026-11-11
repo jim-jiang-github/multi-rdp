@@ -1798,8 +1798,9 @@ h1{font-size:22px;font-weight:600;margin-bottom:4px}
 .sub{color:var(--sub);font-size:13px;margin-bottom:6px}
 .ver{color:var(--sub);font-size:11px;opacity:.62;margin-bottom:4px;font-variant-numeric:tabular-nums}
 .glinks{margin-bottom:20px;font-size:12px}
-.glinks a{color:var(--brand);text-decoration:none;border-bottom:1px dotted currentColor;cursor:pointer}
+.glinks a{display:inline-flex;align-items:center;gap:5px;color:var(--brand);text-decoration:none;border-bottom:1px dotted currentColor;cursor:pointer;vertical-align:middle}
 .glinks a:hover{opacity:.8}
+.gico{width:13px;height:13px;fill:currentColor;flex:0 0 auto}
 .gsep{color:var(--sub);opacity:.5;margin:0 6px}
 button{height:40px;border:none;border-radius:9px;padding:0 18px;font-size:14px;cursor:pointer;font-weight:500}
 .primary{background:var(--brand);color:#fff}
@@ -1882,7 +1883,7 @@ button:disabled{opacity:.5;cursor:default}
 <div class="wrap">
 <div class="top">
 <div><div class="ver" id="ver"></div>
-<div class="glinks"><a id="lnkDl" href="https://github.com/jim-jiang-github/multi-rdp/releases/latest" target="_blank" rel="noopener"></a><span class="gsep">·</span><a id="lnkDoc" href="https://github.com/jim-jiang-github/multi-rdp#readme" target="_blank" rel="noopener"></a><span class="gsep">·</span><a id="lnkIss" href="https://github.com/jim-jiang-github/multi-rdp/issues" target="_blank" rel="noopener"></a></div></div>
+<div class="glinks"><a id="lnkDl" href="https://github.com/jim-jiang-github/multi-rdp/releases/latest" target="_blank" rel="noopener"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg><span id="txtDl"></span></a><span class="gsep">·</span><a id="lnkDoc" href="https://github.com/jim-jiang-github/multi-rdp#readme" target="_blank" rel="noopener"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4c.41 0 .78.17 1.04.44l.21.22c.26.27.63.44 1.04.44h8.21A.75.75 0 0 1 16 2.84v9.91a.75.75 0 0 1-.75.75h-4c-.41 0-.78-.17-1.04-.44l-.21-.22a1.46 1.46 0 0 0-1.04-.44H.75A.75.75 0 0 1 0 12.66V1.75Zm1.5 10.81h6.46c.51 0 1 .21 1.35.58l.21.22c.05.05.12.09.19.09h3.79V3.6h-7.5c-.51 0-1-.21-1.35-.58l-.21-.22a.19.19 0 0 0-.19-.09H1.5v9.85Z"/></svg><span id="txtDoc"></span></a><span class="gsep">·</span><a id="lnkIss" href="https://github.com/jim-jiang-github/multi-rdp/issues" target="_blank" rel="noopener"><svg class="gico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8.75-3.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0ZM8 13.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm1.25-4.5a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z"/></svg><span id="txtIss"></span></a></div></div>
 <button class="ghost langbtn" id="btnLang" onclick="toggleLang()">English</button>
 </div>
 <div id="banner"></div>
@@ -2110,8 +2111,8 @@ document.getElementById('resFull').textContent=t('resFull');
 document.getElementById('grpNative').label=t('grpNative');
 document.getElementById('grpCommon').label=t('grpCommon');
 document.getElementById('btnLang').textContent=t('langBtn');
-for(const [id,k,tk] of [['lnkDl','gDl','gDlTip'],['lnkDoc','gDoc','gDocTip'],['lnkIss','gIss','gIssTip']]){
-const a=document.getElementById(id);if(a){a.textContent=t(k);a.title=t(tk)}}
+for(const [id,k,tk] of [['txtDl','gDl','gDlTip'],['txtDoc','gDoc','gDocTip'],['txtIss','gIss','gIssTip']]){
+const s=document.getElementById(id);if(s){s.textContent=t(k);s.parentNode.title=t(tk)}}
 }
 async function api(path,body){
 try{
