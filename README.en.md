@@ -197,26 +197,6 @@ confirm it manually once - it stays silent afterwards too.
   to end it for good
 - every action is logged to `client.log` ("mstsc launch / client exited")
 
-### Why not FreeRDP (history)
-
-Earlier versions used FreeRDP (`sdl3-freerdp.exe`), but **3.32.0 crashes reliably on Windows 10
-26H1 (build 28000)**: it cannot parse the fastpath bitmap updates that newer builds send.
-`client.log` shows `Fastpath update Bitmap [1] failed, status 0`, the process then dies with
-`0xc0000005` at the same offset `0x886e83` every time (upstream
-[issue #10067](https://github.com/FreeRDP/FreeRDP/issues/10067),
-[#13883](https://github.com/FreeRDP/FreeRDP/issues/13883), fixed only after 3.32).
-
-Both workarounds failed:
-
-- `/gfx:AVC444` (graphics pipeline instead of bitmaps) - worse: crashes went from every 5 minutes
-  to every 40 seconds
-- `/relax-order-checks` (skip the bad update instead of dropping the connection) - the bad data is
-  skipped but the stream pointer never advances, so the same update is re-parsed forever: 13k log
-  lines in one minute and a completely frozen window
-
-So this version switched to mstsc and `3rd/FreeRDP/` is gone from the repo. To go back, the last
-FreeRDP implementation is the commit before `0b756dc`.
-
 ## Security notes
 
 - `users.json` stores managed users' **plaintext passwords** (needed for one-click login). It is

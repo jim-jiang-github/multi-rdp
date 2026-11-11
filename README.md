@@ -182,23 +182,6 @@ cmdkey /list | findstr TERMSRV/127.0.0.
 - 会话断开 / 窗口被隐藏 / 程序重启过，卡片都还会显示最后一张画面（时间戳停在那一刻），
   最后一帧存在 `%LOCALAPPDATA%\MultiRDP\thumbs\<账号>.jpg`，删账号时一并清掉
 
-### 为什么不用 FreeRDP（历史）
-
-早期版本用 FreeRDP（`sdl3-freerdp.exe`），但 **3.32.0 在 Windows 10 26H1（build 28000）
-上会稳定崩**：新版系统发出的快路径位图更新它解析不了，`client.log` 里固定是
-`Fastpath update Bitmap [1] failed, status 0`，进程随后以 `0xc0000005` 退出，每次崩在
-同一个偏移 `0x886e83`（上游 [issue #10067](https://github.com/FreeRDP/FreeRDP/issues/10067)、
-[#13883](https://github.com/FreeRDP/FreeRDP/issues/13883)，3.32 之后才修）。
-
-试过的规避手段都不行：
-
-- `/gfx:AVC444`（走图形管线绕开位图）——更糟，崩溃从 5 分钟一次变成 40 秒一次
-- `/relax-order-checks`（坏更新跳过而不是断开）——坏数据被跳过但读指针不前进，
-  同一条更新被无限重解析，实测一分钟刷 1.3 万条日志、窗口彻底卡死
-
-所以从这一版起换成 mstsc，`3rd/FreeRDP/` 已从仓库移除。要回退，`git log` 里
-`0b756dc` 之前的版本就是 FreeRDP 实现。
-
 ## 安全提示
 
 - `users.json` 保存了托管用户的**明文密码**（供一键登录使用），已被 `.gitignore` 排除，
