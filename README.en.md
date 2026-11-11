@@ -47,6 +47,11 @@ colleagues their own desktop, and so on.
 - **Clean user deletion** — logoff → delete account → delete profile via WMI → force-remove
   leftover folders → clean the `ProfileList` registry key → verify; incomplete deletions stay
   listed as "leftover" and can be retried
+- **Card panel with live-ish previews** — one card per account, the top half is a thumbnail of that
+  remote desktop. No video streaming: while the page is in the foreground it grabs one frame every
+  6 seconds (`PrintWindow`, so an occluded window still captures), and it stops entirely when the
+  tab goes to the background. Click a thumbnail to bring that remote window to the front; a hidden
+  window shows "Window hidden · click to open"
 - **Orphan folder scan** — leftover profile folders created by this tool are re-listed so they
   can be cleaned up
 - **White-screen repair** — detects whether OpenStreamMS hijacked the RDP graphics pipeline
@@ -96,6 +101,7 @@ multi-rdp/
 │   └── webui/
 │       ├── server.py        # web UI + user management core (127.0.0.1:8123)
 │       ├── screencap.py     # pure-ctypes GDI screenshot helper
+│       ├── thumb.py         # capture a remote window -> JPEG thumbnail (card preview)
 │       ├── config.json      # UI config (admin_default / lang / resolution)
 │       └── users.json.example  # user DB template (real users.json is ignored)
 ├── 3rd/                     # prebuilt components (usable as-is, no build needed)

@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 """简易用户管理 Web UI：注册 / 登录(RDP) / 删除。仅监听 127.0.0.1。"""
-import atexit, ctypes, json, os, random, re, shutil, string, subprocess, sys, threading, time, webbrowser, zlib
+import atexit, ctypes, json, os, random, re, shutil, string, subprocess, sys, threading, time, urllib.parse, webbrowser, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+try:
+    from . import thumb                      # 作为包导入（托盘程序走这条）
+except ImportError:                          # python src/webui/server.py 直接跑
+    import thumb
 
 PORT = 8123
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -683,6 +688,34 @@ def _client_window(name, key=None):
     return 0, 0
 
 
+def _owned_hwnd(name):
+    """定位「这个账号」的远程窗口，比 _client_window 更挑剔。
+
+    缩略图和「点画面切过去」必须严格对号：mstsc 的标题里只有回环地址，认不出
+    是哪个账号，_client_window 的「整机只有一个客户端」兜底会把同一个窗口算到
+    别人头上——那就成了把 A 的桌面贴到 B 的卡片上。
+
+    所以兜底只在「这个账号当前确实有 Active 会话」时放行，并且排除已被别的
+    账号占用的窗口；其它情况一律返回 0（前端显示占位图）。
+    """
+    _ensure_adopted()
+    key = (name or '').lower()
+    ent = _clients.get(key)
+    if _alive(ent):
+        if ent.get('hwnd'):
+            return ent['hwnd']
+        hwnd, _pid = _client_window(name)
+        return hwnd
+    st = _sessions().get(key) or {}
+    if st.get('state') != 'active':
+        return 0
+    hwnd, _pid = _client_window(name)
+    if not hwnd:
+        return 0
+    taken = {e.get('hwnd') for k, e in _clients.items() if k != key and _alive(e)}
+    return 0 if hwnd in taken else hwnd
+
+
 def _raise_window(hwnd):
     """把窗口翻到最上层（不需要前台权限）：临时置顶再取消置顶。"""
     _user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
@@ -1265,6 +1298,7 @@ def delete_user(name):
             return False, _t('系统用户不可删除', 'System accounts cannot be deleted')
         # 0. close the remote window opened by us (else files stay locked)
         _kill_client(name.lower())
+        thumb.drop(name)
         # 1. logoff any session, and wait until it really goes away
         sid_session = (_sessions().get(real.lower()) or {}).get('id')
         if sid_session:
@@ -1505,7 +1539,7 @@ HTML = r"""<!DOCTYPE html>
 :root{--bg:#f6f7fb;--card:#fff;--line:#e5e7ef;--txt:#1c1e28;--sub:#7a7f99;--brand:#534ab7;--ok:#0f6e56;--bad:#a32d2d}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;display:flex;justify-content:center;padding:40px 16px}
-.wrap{width:100%;max-width:640px}
+.wrap{width:100%;max-width:1180px}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 h1{font-size:22px;font-weight:600;margin-bottom:4px}
 .sub{color:var(--sub);font-size:13px;margin-bottom:24px}
@@ -1521,17 +1555,32 @@ button:disabled{opacity:.5;cursor:default}
 .chk{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--sub);margin:-6px 0 18px;cursor:pointer;user-select:none}
 .chk input{width:16px;height:16px;accent-color:var(--brand);cursor:pointer;flex:0 0 auto}
 #banner{display:none;background:#fdf3e3;border:1px solid #f2ddb8;color:#8a5a12;font-size:13px;padding:10px 14px;border-radius:10px;margin-bottom:16px;line-height:1.6}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th{color:var(--sub);font-weight:500;text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);font-size:12px}
-td{padding:12px 6px;border-bottom:1px solid var(--line)}
-tr:last-child td{border-bottom:none}
-.tag{display:inline-block;font-size:12px;padding:2px 10px;border-radius:99px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(292px,1fr));gap:16px}
+.ucard{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(20,20,50,.05);display:flex;flex-direction:column;transition:box-shadow .18s,border-color .18s}
+.ucard:hover{box-shadow:0 6px 18px rgba(20,20,50,.10);border-color:#d8dbe9}
+.shot{position:relative;aspect-ratio:16/10;background:#0e1522;cursor:pointer;overflow:hidden}
+.shot img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .3s}
+.shot img.ready{opacity:1}
+.shot .ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#6b7590;font-size:12.5px;text-align:center;padding:0 18px;line-height:1.5}
+.shot .ph svg{opacity:.5}
+.shot .veil{position:absolute;inset:0;background:rgba(10,16,26,.58);display:none;align-items:center;justify-content:center;color:#dfe6f4;font-size:12.5px;text-align:center;padding:0 20px;line-height:1.5}
+.shot.is-dim .veil{display:flex}
+.shot.is-dim .ph{display:none}
+.shot.is-dim img{filter:grayscale(.45) brightness(.72)}
+.shot.is-dim .stamp{opacity:.45}
+.shot .badge{position:absolute;left:9px;top:9px;font-size:11.5px;padding:3px 9px;border-radius:99px;background:rgba(12,18,30,.62);color:#dfe6f4;backdrop-filter:blur(4px)}
+.shot .stamp{position:absolute;right:9px;bottom:8px;font-size:10.5px;color:rgba(230,236,248,.72);background:rgba(12,18,30,.5);padding:2px 7px;border-radius:99px}
+.shot .stamp:empty{display:none}
+.cbody{padding:12px 14px 14px;display:flex;flex-direction:column;gap:11px}
+.cname{display:flex;align-items:center;gap:7px;font-weight:600;font-size:14px;min-width:0}
+.cname span.nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{height:30px;padding:0 11px;font-size:12.5px;border-radius:8px}
+.tag{display:inline-block;font-size:12px;padding:2px 10px;border-radius:99px;flex:0 0 auto}
 .on{background:#e1f5ee;color:var(--ok)}
 .off{background:#eef0f8;color:var(--sub)}
 .disc{background:#fdf3e3;color:#8a5a12}
-.adm{background:#eee9fb;color:#534ab7}
-.acts{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
-.acts button{height:32px;padding:0 12px;font-size:13px}
+.adm{background:#eee9fb;color:#534ab7;font-size:11px;padding:2px 8px}
 #msg{margin-top:14px;font-size:13px;min-height:20px}
 .ok{color:var(--ok)}.err{color:var(--bad)}
 .empty{color:var(--sub);text-align:center;padding:28px 0;font-size:14px}
@@ -1557,9 +1606,10 @@ tr:last-child td{border-bottom:none}
 <optgroup label="本机支持" id="grpNative"></optgroup>
 <optgroup label="常用分辨率" id="grpCommon"></optgroup>
 </select></div>
-<div id="list"></div>
-<div id="msg"></div>
 </div>
+<div id="msg"></div>
+<div class="hint" id="shotHint" style="margin:0 0 12px 2px"></div>
+<div id="grid" class="grid"></div>
 </div>
 <script>
 const I18N={
@@ -1591,6 +1641,13 @@ zh:{
  login:'登录', reset:'重置', grant:'授予管理员', del:'删除用户', delPending:'删除残留',
  tagAdmTitle:'已在管理员组：UAC 弹窗只需点一下「是」，不用输密码',
  tagPendTitle:'账号或文件没删干净，点右侧按钮继续清理',
+shotNone:'未连接',
+shotHidden:'窗口已隐藏 · 点一下打开',
+shotOff:'会话已断开',
+shotWait:'等待画面…',
+shotTip:'点一下切到这个远程桌面',
+shotLive:'画面在后台标签页时暂停刷新',
+focusFail:'切换窗口失败：',
  bannerNoAdmin:'⚠ 当前没有管理员权限，创建/删除会失败。请以管理员身份重新运行本程序。',
  creating:'正在创建…',
  createdAdmin:'已创建用户 {name}（管理员权限：启动需要管理员的程序只需点「是」），点「登录」即可进入',
@@ -1655,6 +1712,13 @@ en:{
  login:'Login', reset:'Reset', grant:'Grant admin', del:'Delete', delPending:'Clean up',
  tagAdmTitle:'Already in Administrators: UAC only needs a click, no password',
  tagPendTitle:'Account or files were not fully removed — click to continue cleaning up',
+shotNone:'Not connected',
+shotHidden:'Window hidden · click to open',
+shotOff:'Session disconnected',
+shotWait:'Waiting for the screen…',
+shotTip:'Click to switch to this desktop',
+shotLive:'Preview pauses while this tab is in the background',
+focusFail:'Failed to switch window: ',
  bannerNoAdmin:'⚠ No administrator rights: creating/deleting users will fail. Please run this program as administrator.',
  creating:'Creating…',
  createdAdmin:'User {name} created (administrator: programs that need admin rights only require a click on UAC). Click Login to enter',
@@ -1707,6 +1771,7 @@ document.getElementById('resFull').textContent=t('resFull');
 document.getElementById('grpNative').label=t('grpNative');
 document.getElementById('grpCommon').label=t('grpCommon');
 document.getElementById('btnLang').textContent=t('langBtn');
+document.getElementById('shotHint').textContent=t('shotLive');
 }
 async function api(path,body){
 try{
@@ -1746,35 +1811,121 @@ msg(on?t('saveCfgOkAdmin'):t('saveCfgOkNormal'),on?'ok':'');
 async function saveRes(){
 try{await api('config',{resolution:document.getElementById('resSel').value})}catch(e){}
 }
+const USERS_MS=8000, SHOT_MS=6000;
+let cards={};
+const MON_SVG='<svg width="27" height="27" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="2.5" y="4" width="19" height="12.5" rx="2.2"/><path d="M9.2 20h5.6M12 16.6V20"/></svg>';
+
+function createCard(name){
+const el=document.createElement('div');
+el.className='ucard';
+el.innerHTML='<div class="shot" onclick="focusUser(\''+name+'\')" title="'+t('shotTip')+'">'+
+'<img alt="">'+
+'<div class="ph">'+MON_SVG+'<div class="pht"></div></div>'+
+'<div class="veil"></div>'+
+'<span class="badge"></span>'+
+'<span class="stamp"></span></div>'+
+'<div class="cbody"><div class="cname"><span class="nm"></span>'+
+'<span class="tag adm" style="display:none">'+t('admin')+'</span></div>'+
+'<div class="acts"></div></div>';
+const c={name:name,el:el,shot:el.querySelector('.shot'),img:el.querySelector('img'),
+ph:el.querySelector('.ph'),pht:el.querySelector('.pht'),veil:el.querySelector('.veil'),
+badge:el.querySelector('.badge'),stamp:el.querySelector('.stamp'),
+acts:el.querySelector('.acts'),adm:el.querySelector('.adm'),nm:el.querySelector('.nm'),user:null};
+cards[name]=c;
+return c;
+}
+
+function updateCard(c,u){
+c.user=u;
+c.nm.textContent=u.name;
+c.adm.style.display=u.admin?'':'none';
+const bg=u.online&&u.window==='hidden';
+const noWin=u.window==='none';
+let cls='shot';
+if(noWin||!u.connected)cls+=' is-off';
+if(bg)cls+=' is-dim';
+c.shot.className=cls;
+const st=u.pending?t('pending'):(bg?t('bg'):(u.online?t('online'):(u.connected?t('disconnected'):t('offline'))));
+const stTitle=bg?t('tagBgTitle'):(u.online?t('tagActiveTitle'):(u.connected?t('tagDiscTitle'):(u.pending?t('tagPendTitle'):t('tagOffTitle'))));
+c.badge.textContent=st;
+c.badge.title=stTitle;
+c.badge.style.color=u.pending?'#f0c27b':(u.online?'#8ce8c4':(u.connected?'#f2d19b':'#cfd5e6'));
+c.veil.textContent=u.pending?t('pending'):(bg?t('shotHidden'):(noWin?(u.connected?t('shotOff'):t('shotNone')):''));
+if(noWin){c.img.classList.remove('ready');c.ph.style.display='flex';c.stamp.style.display='none'}
+c.pht.textContent=u.pending?'':(u.online?t('shotWait'):(noWin?(u.connected?t('shotOff'):t('shotNone')):t('shotWait')));
+const q='\''+u.name+'\'';
+let inner='';
+if(u.pending){
+inner='<button class="danger" onclick="del('+q+')">'+t('delPending')+'</button>';
+}else{
+inner+=bg?'<button class="ghost" onclick="showWin('+q+')">'+t('show')+'</button>'
+:(u.online?'<button class="ghost" onclick="hideWin('+q+')">'+t('hide')+'</button>'
+:'<button class="ghost" onclick="login('+q+')">'+t('login')+'</button>');
+inner+='<button class="ghost" onclick="reset('+q+')">'+t('reset')+'</button>';
+if(!u.admin)inner+='<button class="ghost" onclick="grant('+q+')">'+t('grant')+'</button>';
+inner+='<button class="danger" onclick="del('+q+')">'+t('del')+'</button>';
+}
+c.acts.innerHTML=inner;
+}
+
 async function refresh(){
+if(document.visibilityState!=='visible')return;
 let users;
 try{users=await (await fetch('/api/users')).json()}catch(e){return}
 if(!Array.isArray(users))return;
-const el=document.getElementById('list');
-if(!users.length){el.innerHTML='<div class="empty">'+t('empty')+'</div>';return}
-el.innerHTML='<table><tr><th>'+t('thUser')+'</th><th>'+t('thStatus')+'</th><th style="text-align:right">'+t('thAct')+'</th></tr>'+
-users.map(u=>{
-if(u.pending){
-return '<tr><td>'+u.name+'</td><td><span class="tag disc" title="'+t('tagPendTitle')+'">'+t('pending')+'</span></td>'+
-'<td><div class="acts"><button class="danger" onclick="del(\''+u.name+'\')">'+t('delPending')+'</button></div></td></tr>';
+const grid=document.getElementById('grid');
+if(!users.length){grid.innerHTML='<div class="empty">'+t('empty')+'</div>';cards={};return}
+const seen={};
+for(const u of users){
+seen[u.name]=1;
+const c=cards[u.name]||createCard(u.name);
+updateCard(c,u);
+grid.appendChild(c.el);
 }
-const bg=u.online&&u.window==='hidden';
-const st=bg?t('bg'):(u.online?t('online'):(u.connected?t('disconnected'):t('offline')));
-const stTitle=bg?t('tagBgTitle'):(u.online?t('tagActiveTitle'):(u.connected?t('tagDiscTitle'):t('tagOffTitle')));
-const admTag=u.admin?' <span class="tag adm" title="'+t('tagAdmTitle')+'">'+t('admin')+'</span>':'';
-const grantBtn=u.admin?'':'<button class="ghost" onclick="grant(\''+u.name+'\')">'+t('grant')+'</button>';
-const mainBtn=bg
-?'<button class="ghost" onclick="showWin(\''+u.name+'\')">'+t('show')+'</button>'
-:(u.online
-?'<button class="ghost" onclick="hideWin(\''+u.name+'\')">'+t('hide')+'</button>'
-:'<button class="ghost" onclick="login(\''+u.name+'\')">'+t('login')+'</button>');
-return '<tr><td>'+u.name+admTag+'</td><td><span class="tag '+(u.online?'on':(u.connected?'disc':'off'))+'" title="'+stTitle+'">'+st+'</span></td>'+
-'<td><div class="acts">'+mainBtn+
-'<button class="ghost" onclick="reset(\''+u.name+'\')">'+t('reset')+'</button>'+
-grantBtn+
-'<button class="danger" onclick="del(\''+u.name+'\')">'+t('del')+'</button></div></td></tr>';
-}).join('')+'</table>';
+for(const n of Object.keys(cards)){if(!seen[n]){cards[n].el.remove();delete cards[n]}}
 }
+
+async function loadThumb(c){
+if(!c||!c.user)return;
+try{
+const r=await fetch('/api/thumb?name='+encodeURIComponent(c.name)+'&t='+Date.now(),{cache:'no-store'});
+if(r.status===200){
+const blob=await r.blob();
+const url=URL.createObjectURL(blob);
+const prev=c.img.dataset.url;
+c.img.src=url;
+c.img.dataset.url=url;
+c.img.classList.add('ready');
+c.ph.style.display='none';
+c.stamp.textContent=new Date().toLocaleTimeString();
+c.stamp.style.display='';
+if(prev)URL.revokeObjectURL(prev);
+}else{
+c.stamp.style.display='none';
+if(!c.img.dataset.url){
+c.pht.textContent=(r.headers.get('X-Thumb')==='hidden')?t('shotHidden'):t('shotNone');
+}
+}
+}catch(e){}
+}
+
+let shotTimer=null;
+async function shotTick(){
+clearTimeout(shotTimer);
+if(document.visibilityState==='visible'){
+const jobs=[];
+for(const n in cards){const c=cards[n];if(c.user&&c.user.online)jobs.push(loadThumb(c))}
+await Promise.all(jobs);
+}
+shotTimer=setTimeout(shotTick,SHOT_MS);
+}
+
+async function focusUser(name){
+const r=await api('focus',{name:name});
+if(r&&r.ok){msg('')}else{msg(t('focusFail')+((r&&r.error)||''),'err')}
+refresh();
+}
+
 async function register(){
 const btn=document.getElementById('btnNew');btn.disabled=true;
 msg(t('creating'));
@@ -1849,7 +2000,12 @@ applyI18n();
 applyStatus(s);
 }catch(e){applyI18n()}
 await refresh();
-setInterval(refresh,8000);
+shotTick();
+setInterval(refresh,USERS_MS);
+document.addEventListener('visibilitychange',function(){
+if(document.visibilityState==='visible'){refresh();shotTick()}
+else{clearTimeout(shotTimer)}
+});
 })();
 </script></body></html>"""
 
@@ -1881,6 +2037,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Pragma', 'no-cache')
             self.end_headers()
             self.wfile.write(body)
+        elif self.path.startswith('/api/thumb'):
+            self._thumb()
         elif self.path == '/api/users':
             self._json(list_users())
         elif self.path == '/api/status':
@@ -1891,6 +2049,31 @@ class Handler(BaseHTTPRequestHandler):
                         'modes': modes, 'common': _common_resolutions(modes)})
         else:
             self.send_error(404)
+
+    def _thumb(self):
+        """一张缩略图。status 200=有画面，204=没画面（X-Thumb 说明原因）。
+
+        只截「窗口当前真的可见」的会话：窗口藏起来时 Windows 不再给它渲染，
+        硬抓只会得到黑屏，所以直接回 204，前端保持上一帧并打上「已隐藏」。
+        """
+        q = urllib.parse.urlparse(self.path).query
+        name = (urllib.parse.parse_qs(q).get('name') or [''])[0]
+        data, state = None, 'none'
+        if name:
+            try:
+                hwnd = _owned_hwnd(name)
+                data, state = thumb.render(name, hwnd)
+            except Exception as e:
+                _log('缩略图失败 %s: %s' % (name, e))
+        self.send_response(200 if data else 204)
+        self.send_header('X-Thumb', state)
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
+        if data:
+            self.send_header('Content-Type', 'image/jpeg')
+            self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        if data:
+            self.wfile.write(data)
 
     def do_POST(self):
         # 任何未预期异常都必须回一个 JSON，否则浏览器只能看到 "Failed to fetch"
@@ -1942,6 +2125,19 @@ class Handler(BaseHTTPRequestHandler):
         elif p == '/api/show':
             ok, err = show_client(body.get('name', ''))
             self._json({'ok': ok, 'error': err})
+        elif p == '/api/focus':
+            # 点卡片上的画面：藏着的先请回来，已经在桌面上的就拉到前台
+            name = body.get('name', '')
+            hwnd = _owned_hwnd(name)
+            if not hwnd:
+                self._json({'ok': False,
+                            'error': _t('没有找到该用户的远程窗口',
+                                        'No remote window found for this user')})
+            elif not _user32.IsWindowVisible(hwnd):
+                self._json({'ok': show_client(name)[0], 'error': None})
+            else:
+                _activate_window(hwnd)
+                self._json({'ok': True, 'error': None})
         elif p == '/api/disconnect':
             ok, err = disconnect_session(body.get('name', ''))
             self._json({'ok': ok, 'error': err})
