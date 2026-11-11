@@ -1544,17 +1544,12 @@ body{font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;background:va
 h1{font-size:22px;font-weight:600;margin-bottom:4px}
 .sub{color:var(--sub);font-size:13px;margin-bottom:6px}
 .ver{color:var(--sub);font-size:11px;opacity:.62;margin-bottom:22px;font-variant-numeric:tabular-nums}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;box-shadow:0 1px 2px rgba(20,20,50,.04)}
-.row{display:flex;gap:10px;margin-bottom:20px;align-items:center}
 button{height:40px;border:none;border-radius:9px;padding:0 18px;font-size:14px;cursor:pointer;font-weight:500}
 .primary{background:var(--brand);color:#fff}
 .ghost{background:#eef0f8;color:var(--txt)}
 .danger{background:#fceaea;color:var(--bad)}
 button:disabled{opacity:.5;cursor:default}
-.wide{flex:1}
 .hint{color:var(--sub);font-size:13px;line-height:1.6}
-.chk{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--sub);margin:-6px 0 18px;cursor:pointer;user-select:none}
-.chk input{width:16px;height:16px;accent-color:var(--brand);cursor:pointer;flex:0 0 auto}
 #banner{display:none;background:#fdf3e3;border:1px solid #f2ddb8;color:#8a5a12;font-size:13px;padding:10px 14px;border-radius:10px;margin-bottom:16px;line-height:1.6}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(292px,1fr));gap:16px}
 .ucard{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(20,20,50,.05);display:flex;flex-direction:column;transition:box-shadow .18s,border-color .18s}
@@ -1584,7 +1579,18 @@ button:disabled{opacity:.5;cursor:default}
 .adm{background:#eee9fb;color:#534ab7;font-size:11px;padding:2px 8px}
 #msg{margin-top:14px;font-size:13px;min-height:20px}
 .ok{color:var(--ok)}.err{color:var(--bad)}
-.empty{color:var(--sub);text-align:center;padding:28px 0;font-size:14px}
+.empty{color:var(--sub);text-align:center;padding:28px 0;font-size:14px;grid-column:1/-1}
+.newcard{border-style:dashed;border-color:#ccd3e6;background:rgba(255,255,255,.55)}
+.newcard:hover{border-color:#9fa9c6;background:#fff;box-shadow:0 6px 18px rgba(20,20,50,.08)}
+.newshot{width:100%;height:auto;flex:0 0 auto;aspect-ratio:16/10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:0;background:transparent;border-radius:0;color:var(--sub);cursor:pointer}
+.newshot .plus{width:62px;height:62px;border-radius:50%;border:2px dashed #b8c1d8;display:flex;align-items:center;justify-content:center;font-size:35px;font-weight:300;line-height:1;color:#8d97b4;padding-bottom:4px;transition:transform .18s,color .18s,border-color .18s}
+.newcard:hover .plus{border-style:solid;border-color:var(--brand);color:var(--brand);transform:scale(1.06)}
+.newlbl{font-size:13px;font-weight:500}
+.newbody{gap:9px}
+.newopt{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--sub);cursor:pointer;user-select:none;min-width:0}
+.newopt input{width:15px;height:15px;accent-color:var(--brand);cursor:pointer;flex:0 0 auto}
+.newopt select{height:28px;font-size:12.5px;border:1px solid var(--line);border-radius:7px;padding:0 6px;background:#fff;color:var(--txt);flex:1;min-width:0;cursor:pointer}
+.newbtn{height:32px;font-size:13px;border-radius:8px;padding:0 12px}
 .langbtn{height:32px;padding:0 12px;font-size:13px;flex:0 0 auto}
 </style></head><body>
 <div class="wrap">
@@ -1593,35 +1599,41 @@ button:disabled{opacity:.5;cursor:default}
 <button class="ghost langbtn" id="btnLang" onclick="toggleLang()">English</button>
 </div>
 <div id="banner"></div>
-<div class="card">
-<div class="row">
-<button class="primary wide" id="btnNew" onclick="register()">+ 创建用户（自动生成账号密码）</button>
-<button class="danger" id="btnFix" style="display:none" onclick="fixRdp()">修复画面</button>
-</div>
-<label class="chk" title="勾选后新账号加入管理员组：启动需要管理员的程序（如游戏启动器）时 UAC 只需点「是」，不用输管理员密码">
-<input type="checkbox" id="chkAdmin" onchange="saveCfg()"><span id="chkAdminText">新用户授予管理员权限（启动需要管理员的程序时不用输密码）</span></label>
-<div class="chk"><span id="resLabel">远程桌面分辨率</span>：
-<select id="resSel" onchange="saveRes()">
+<div id="msg"></div>
+<div class="hint" id="shotHint" style="margin:0 0 12px 2px"></div>
+<div id="grid" class="grid">
+<div class="ucard newcard" id="newCard">
+<button class="newshot" id="btnNew" onclick="register()" title="点击创建新账号，账号和密码自动生成">
+<span class="plus">+</span><span class="newlbl" id="newLbl">新建账号</span>
+</button>
+<div class="cbody newbody">
+<label class="newopt" id="chkAdminLbl">
+<input type="checkbox" id="chkAdmin" onchange="saveCfg()"><span id="chkAdminText">授予管理员权限</span></label>
+<div class="newopt"><span id="resLabel">远程桌面分辨率</span><select id="resSel" onchange="saveRes()">
 <option value="auto" id="resAuto">跟随本机屏幕</option>
 <option value="fullscreen" id="resFull">全屏（无窗口边框）</option>
 <optgroup label="本机支持" id="grpNative"></optgroup>
 <optgroup label="常用分辨率" id="grpCommon"></optgroup>
 </select></div>
+<button class="primary newbtn" id="btnCreate" onclick="register()">创建账号</button>
+<button class="danger newbtn" id="btnFix" style="display:none" onclick="fixRdp()">修复画面</button>
 </div>
-<div id="msg"></div>
-<div class="hint" id="shotHint" style="margin:0 0 12px 2px"></div>
-<div id="grid" class="grid"></div>
+</div>
+</div>
 </div>
 <script>
 const I18N={
 zh:{
  title:'用户管理',
  subtitle:'点一下自动创建一个独立账号，密码由程序随机生成并保存',
- btnNew:'+ 创建用户（自动生成账号密码）',
+ btnNew:'新建账号',
+ btnCreate:'创建账号',
+ newTip:'点击创建新账号，账号和密码自动生成',
+ chkAdminTip:'勾选后新账号加入管理员组：启动需要管理员的程序（如游戏启动器）时 UAC 只需点「是」，不用输管理员密码',
  btnFix:'修复画面',
- chkAdmin:'新用户授予管理员权限（启动需要管理员的程序时不用输密码）',
+ chkAdmin:'授予管理员权限',
  thUser:'用户', thStatus:'状态', thAct:'操作',
- empty:'还没有用户，点上面按钮创建一个',
+ empty:'还没有账号，点左边卡片上的 + 新建一个',
  online:'运行中', offline:'不在线', disconnected:'已断开 · 后台运行', pending:'残留', admin:'管理员',
  bg:'后台运行 · 会话激活',
  disconnect:'断开',
@@ -1688,11 +1700,14 @@ focusFail:'切换窗口失败：',
 en:{
  title:'User Management',
  subtitle:'Create an isolated local account in one click — the password is generated and saved automatically',
- btnNew:'+ Create user (auto username & password)',
+ btnNew:'New account',
+ btnCreate:'Create',
+ newTip:'Click to create a new account - username and password are generated for you',
+ chkAdminTip:'Add new accounts to the Administrators group: programs that need elevation only ask for a Yes/No instead of an admin password',
  btnFix:'Fix display',
- chkAdmin:'Grant administrator rights to new users (no password prompt on UAC)',
+ chkAdmin:'Grant administrator',
  thUser:'User', thStatus:'Status', thAct:'Actions',
- empty:'No users yet — click the button above to create one.',
+ empty:'No accounts yet - click + on the card to create one.',
  online:'Active', offline:'Offline', disconnected:'Disconnected · running', pending:'Leftover', admin:'Admin',
  bg:'Background · session active',
  disconnect:'Disconnect',
@@ -1765,9 +1780,12 @@ document.documentElement.lang=(LANG==='zh'?'zh-CN':'en');
 document.title=t('title');
 document.getElementById('ttl').textContent=t('title');
 document.getElementById('sub').textContent=t('subtitle');
-document.getElementById('btnNew').textContent=t('btnNew');
+document.getElementById('newLbl').textContent=t('btnNew');
+document.getElementById('btnCreate').textContent=t('btnCreate');
 document.getElementById('btnFix').textContent=t('btnFix');
 document.getElementById('chkAdminText').textContent=t('chkAdmin');
+document.getElementById('chkAdminLbl').title=t('chkAdminTip');
+document.getElementById('btnNew').title=t('newTip');
 document.getElementById('resLabel').textContent=t('resLabel');
 document.getElementById('resAuto').textContent=t('resAuto');
 document.getElementById('resFull').textContent=t('resFull');
@@ -1879,7 +1897,14 @@ let users;
 try{users=await (await fetch('/api/users')).json()}catch(e){return}
 if(!Array.isArray(users))return;
 const grid=document.getElementById('grid');
-if(!users.length){grid.innerHTML='<div class="empty">'+t('empty')+'</div>';cards={};return}
+let tip=document.getElementById('emptyTip');
+if(!users.length){
+for(const n in cards){cards[n].el.remove();delete cards[n]}
+if(!tip){tip=document.createElement('div');tip.id='emptyTip';tip.className='empty';grid.appendChild(tip)}
+tip.textContent=t('empty');
+return;
+}
+if(tip)tip.remove();
 const seen={};
 for(const u of users){
 seen[u.name]=1;
@@ -1932,14 +1957,15 @@ refresh();
 }
 
 async function register(){
-const btn=document.getElementById('btnNew');btn.disabled=true;
+const btn=document.getElementById('btnNew'),btn2=document.getElementById('btnCreate');
+btn.disabled=true;btn2.disabled=true;
 msg(t('creating'));
 try{
 const r=await api('register',{admin:document.getElementById('chkAdmin').checked});
 if(r.ok)msg(t(r.user.admin?'createdAdmin':'createdNormal',{name:r.user.name}),'ok');
 else msg(r.error,'err');
 }catch(e){msg(t('requestFail')+e,'err')}
-btn.disabled=false;
+btn.disabled=false;btn2.disabled=false;
 refresh();
 }
 async function hideWin(name){

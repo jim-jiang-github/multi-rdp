@@ -12,7 +12,8 @@ colleagues their own desktop, and so on.
 > The button at the top right switches between English and Chinese instantly
 > (Chinese UI: [docs/screenshot_webui.png](docs/screenshot_webui.png)).
 
-> UI overview: **Create user** generates a random account name + strong password automatically;
+> UI overview: the first card in the grid is **New account** - click the plus (or the Create button
+> inside it) to generate a random account name + strong password automatically;
 > **Login** opens a separate mstsc window (Windows' built-in client); **Reset** signs the session
 > out (useful when the desktop freezes); **Delete** removes the account, profile folder and
 > registry leftovers.
