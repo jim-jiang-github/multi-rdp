@@ -1,0 +1,176 @@
+name: Release
+
+# 打一个 v* 的 tag（例如 v1.2.0）就自动构建 exe 并发布到 GitHub Release。
+# 也可以手动触发（Actions -> Release -> Run workflow）：只构建、留 artifact，不发 Release，
+# 用来验证构建没坏。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # 和本地 scripts/build.bat 打出来的版本保持一致，避免 CI 与本地行为不同
+  PYINSTALLER_VERSION: '6.22.3'
+
+jobs:
+  build:
+    name: Build Windows exe
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 要拿上一个 tag 来生成改动列表
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Work out the version
+        id: ver
+        shell: pwsh
+        run: |
+          $isRelease = $env:GITHUB_REF -like 'refs/tags/*'
+          $tag = if ($isRelease) { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "release=$($isRelease.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "version: $tag  release: $isRelease"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt "pyinstaller==$env:PYINSTALLER_VERSION"
+
+      - name: Generate icon
+        run: python scripts/make_icon.py
+
+      - name: Generate version resource
+        run: python scripts/make_version.py --tag "${{ steps.ver.outputs.tag }}" --out "${{ runner.temp }}/version_info.txt"
+
+      - name: Build MultiRDP.exe
+        env:
+          MULTIRDP_VERSION_FILE: ${{ runner.temp }}\version_info.txt
+        run: python -m PyInstaller --noconfirm --clean --workpath .build MultiRDP.spec
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          # 单文件 exe 起来后要能导入 webui.server、读到配置，否则退出码非 0
+          $p = Start-Process -FilePath .\dist\MultiRDP.exe -ArgumentList '--selftest' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "selftest failed (exit $($p.ExitCode))" }
+          $info = (Get-Item .\dist\MultiRDP.exe).VersionInfo
+          Write-Host "exe version: $($info.FileVersion) / product: $($info.ProductVersion)"
+          if ('${{ steps.ver.outputs.release }}' -eq 'true' -and -not $info.FileVersion) {
+            throw 'version resource is missing from the release exe'
+          }
+
+      - name: Package
+        id: pkg
+        shell: pwsh
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          $zip = "MultiRDP-$env:TAG-win64.zip"
+          New-Item -ItemType Directory -Path pkg -Force | Out-Null
+          Copy-Item dist\MultiRDP.exe pkg\
+          Copy-Item README.md, README.en.md, LICENSE pkg\
+          Compress-Archive -Path pkg\* -DestinationPath $zip -CompressionLevel Optimal
+
+          $exeHash = (Get-FileHash dist\MultiRDP.exe -Algorithm SHA256).Hash.ToLower()
+          $zipHash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          $text = "$exeHash  MultiRDP.exe`n$zipHash  $zip`n"
+          [IO.File]::WriteAllText("$PWD\SHA256SUMS.txt", $text)
+
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          Write-Host $text
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MultiRDP-${{ steps.ver.outputs.tag }}-win64
+          path: |
+            dist/MultiRDP.exe
+            ${{ steps.pkg.outputs.zip }}
+            SHA256SUMS.txt
+          retention-days: 14
+
+      - name: Compose release notes
+        if: steps.ver.outputs.release == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          # 静态部分用引号 heredoc 原样写入（避免 markdown 反引号被 bash 当成命令），
+          # 之后再把 __TAG__ 换成真实 tag。
+          cat > RELEASE_NOTES.md <<'EOF'
+          Windows 多用户远程桌面管理工具 · 单文件、免安装。远程客户端用系统自带 `mstsc.exe`。
+
+          ## 下载
+
+          | 文件 | 说明 |
+          | --- | --- |
+          | `MultiRDP-__TAG__-win64.zip` | 解压即用，含 exe 与说明文档 |
+          | `MultiRDP.exe` | 单文件，双击直接运行 |
+          | `SHA256SUMS.txt` | 校验值，`certutil -hashfile MultiRDP.exe SHA256` 对比 |
+
+          ## 使用
+
+          1. 双击 `MultiRDP.exe`，同意管理员提权（创建本地账户、启动远程会话需要）
+          2. 托盘图标右键 → **打开 Web UI**（默认 http://127.0.0.1:8123）
+          3. 网页里新建账号，卡片会显示各会话的实时缩略图；点卡片把窗口切到前台
+
+          `users.json` / `config.json` / `aliases.json` 自动生成在 exe 同目录，升级时只替换 exe，配置和缩略图都留着。
+
+          **环境**：Windows 10/11 x64。不需要装 FreeRDP 或 .NET，系统自带 mstsc 即可。
+
+          ## 本次改动
+          EOF
+
+          sed -i "s/__TAG__/$TAG/g" RELEASE_NOTES.md
+
+          prev=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            echo "" >> RELEASE_NOTES.md
+            echo "比对 \`$prev...$TAG\`：" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            git log --no-merges --pretty=format:'- %s (%h)' "$prev..$TAG" >> RELEASE_NOTES.md
+          else
+            echo "" >> RELEASE_NOTES.md
+            git log --no-merges --pretty=format:'- %s (%h)' -20 >> RELEASE_NOTES.md
+          fi
+          echo "" >> RELEASE_NOTES.md
+
+          {
+            echo ""
+            echo '---'
+            echo '构建产物由 GitHub Actions 在 windows-latest 上生成，未做代码签名，首次运行 SmartScreen 可能提示「未知发布者」，选「更多信息 → 仍要运行」。'
+          } >> RELEASE_NOTES.md
+
+          cat RELEASE_NOTES.md
+
+      - name: Publish release
+        if: steps.ver.outputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: MultiRDP ${{ steps.ver.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          # 带后缀的 tag（v1.2.0-beta1）自动标成预发布
+          prerelease: ${{ contains(steps.ver.outputs.tag, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/MultiRDP.exe
+            ${{ steps.pkg.outputs.zip }}
+            SHA256SUMS.txt

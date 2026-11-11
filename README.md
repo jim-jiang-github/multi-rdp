@@ -2,6 +2,9 @@
 
 [English](README.en.md) | **简体中文**
 
+[![Release](https://github.com/jim-jiang-github/multi-rdp/actions/workflows/release.yml/badge.svg)](https://github.com/jim-jiang-github/multi-rdp/actions/workflows/release.yml)
+[![最新版本](https://img.shields.io/github/v/release/jim-jiang-github/multi-rdp)](https://github.com/jim-jiang-github/multi-rdp/releases)
+
 在 Windows 10/11 上快速创建多个互相隔离的本地账号，每个账号一键打开独立的远程桌面窗口，
 并通过**系统托盘常驻**的小工具统一管理。适合在一台电脑上同时跑多个隔离环境（游戏多开、
 测试环境、给家人/同事开独立桌面等）的场景。
@@ -83,6 +86,35 @@ scripts\build.bat
 python src\webui\server.py
 ```
 
+### 方式四：下载现成的 exe
+
+每个 tag 都会由 GitHub Actions 自动打包并发布到
+[Releases](https://github.com/jim-jiang-github/multi-rdp/releases)：下载
+`MultiRDP-vX.Y.Z-win64.zip` 解压，或直接下 `MultiRDP.exe` 双击运行——免安装、免 Python。
+Release 里的 `SHA256SUMS.txt` 是对应的校验值。
+
+## 发布新版本
+
+发版全在 CI 里做，本地不用打包：`.github/workflows/release.yml` 监听 `v*` 的 tag，在
+`windows-latest` 上装依赖 → 生成图标 → 按 tag 生成 exe 版本资源 → PyInstaller 打包 →
+`--selftest` 自检 → 压缩 + 算 SHA256 → 发布 Release。
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+| 事件 | 结果 |
+| --- | --- |
+| 推送 tag `v1.2.0` | 构建并发布 Release，正文自动列出上一个 tag 以来的提交 |
+| 推送 tag `v1.2.0-beta1` | 同上，但标记为 prerelease |
+| Actions → Release → Run workflow | 只构建、留 artifact，不发 Release（验证构建用） |
+
+Release 里附三样东西：`MultiRDP.exe`（单文件）、`MultiRDP-vX.Y.Z-win64.zip`
+（exe + 说明文档）、`SHA256SUMS.txt`。exe 的版本号取自 tag，右键 → 属性 → 详细信息
+能看到；PyInstaller 版本在 workflow 的 `PYINSTALLER_VERSION` 里锁死，与本地
+`build.bat` 一致。CI 产物没有代码签名，首次运行 SmartScreen 会提示「未知发布者」。
+
 ## 项目结构
 
 ```text
@@ -103,6 +135,7 @@ multi-rdp/
 │   ├── run.bat              # 双击运行/调试
 │   ├── build.bat            # 打包单 exe（图标生成 → PyInstaller）
 │   ├── make_icon.py         # 矢量绘制应用图标，产出 assets/*.ico|png
+│   ├── make_version.py      # 按 tag 生成 exe 版本资源（CI 打包时用）
 │   ├── fix_termwrap.bat     # 设置 ServiceDll 持久化（重启后自动生效）
 │   ├── rollback_termwrap.bat# 回滚 ServiceDll 到原值
 │   └── check_termwrap.ps1   # 检查 TermWrap 加载状态与并发会话开关
@@ -111,6 +144,8 @@ multi-rdp/
 │   ├── multirdp.png         # 1024px 主图
 │   └── tray.png             # 托盘专用简化版（16px 可读）
 ├── MultiRDP.spec            # PyInstaller 构建入口（挂图标 + 内嵌 tray.png）
+├── .github/workflows/
+│   └── release.yml          # 打 tag 自动构建并发布 Release
 └── docs/                    # 截图等文档资源
 ```
 

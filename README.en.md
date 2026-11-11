@@ -94,6 +94,36 @@ the `mstsc.exe` that ships with Windows, so nothing else has to be copied. First
 python src\webui\server.py
 ```
 
+### Option 4 — download a release
+
+Every tag is built and published to
+[Releases](https://github.com/jim-jiang-github/multi-rdp/releases) by GitHub Actions. Grab
+`MultiRDP-vX.Y.Z-win64.zip` (unzip and run) or just `MultiRDP.exe` — no installer, no Python.
+`SHA256SUMS.txt` in the release carries the matching checksums.
+
+## Releasing
+
+Cutting a release is a tag push; nothing is packaged locally. `.github/workflows/release.yml`
+listens for `v*` tags, and on `windows-latest` it installs the deps, regenerates the icon,
+derives the exe version resource from the tag, builds with PyInstaller, runs `--selftest`,
+zips + hashes, and publishes the GitHub Release.
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+| Event | Result |
+| --- | --- |
+| Tag `v1.2.0` pushed | Builds and publishes a Release; body lists commits since the previous tag |
+| Tag `v1.2.0-beta1` pushed | Same, flagged as a prerelease |
+| Actions → Release → Run workflow | Build only, artifact kept, no Release (smoke test) |
+
+Assets: `MultiRDP.exe` (single file), `MultiRDP-vX.Y.Z-win64.zip` (exe + docs) and
+`SHA256SUMS.txt`. The exe version comes from the tag (right-click → Properties → Details);
+PyInstaller is pinned via `PYINSTALLER_VERSION` in the workflow to match `build.bat`.
+CI builds are unsigned, so SmartScreen warns "unknown publisher" on first run.
+
 ## Project layout
 
 ```text
@@ -114,6 +144,7 @@ multi-rdp/
 │   ├── run.bat              # double-click run/debug
 │   ├── build.bat            # package single exe (icon -> PyInstaller)
 │   ├── make_icon.py         # vector-drawn app icon, emits assets/*.ico|png
+│   ├── make_version.py      # exe version resource from the tag (used by CI)
 │   ├── fix_termwrap.bat     # persist ServiceDll (effective after reboot)
 │   ├── rollback_termwrap.bat# restore the original ServiceDll
 │   └── check_termwrap.ps1   # check TermWrap load state / concurrent sessions flag
@@ -122,6 +153,8 @@ multi-rdp/
 │   ├── multirdp.png         # 1024px master
 │   └── tray.png             # simplified tray variant (readable at 16px)
 ├── MultiRDP.spec            # PyInstaller entry point (icon + bundled tray.png)
+├── .github/workflows/
+│   └── release.yml          # tag push -> build -> GitHub Release
 └── docs/                    # screenshots and docs assets
 ```
 

@@ -10,6 +10,10 @@
 # Windows PowerShell 5.1 需要 BOM 才能正确读取中文（文件本身另存为 UTF-8 with BOM）
 *.ps1 text eol=crlf
 
+# GitHub Actions 的 YAML 用 LF 更稳，CRLF 有踩坑记录
+*.yml text eol=lf
+*.yaml text eol=lf
+
 # Shell 脚本必须是 LF，CRLF 会导致 /bin/bash^M 报错
 *.sh text eol=lf
 
