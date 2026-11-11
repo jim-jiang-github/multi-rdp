@@ -111,39 +111,6 @@ python src\webui\server.py
 `MultiRDP-vX.Y.Z-win64.zip` 解压，或直接下 `MultiRDP.exe` 双击运行——免安装、免 Python。
 Release 里的 `SHA256SUMS.txt` 是对应的校验值。
 
-## 发布新版本
-
-发版全在 CI 里做，本地不用打包：`.github/workflows/release.yml` 监听 `v*` 的 tag，在
-`windows-latest` 上装依赖 → 生成图标 → 按 tag 生成 exe 版本资源 → PyInstaller 打包 →
-`--selftest` 自检 → 压缩 + 算 SHA256 → 发布 Release。
-
-```bash
-git tag v1.2.0
-git push origin v1.2.0
-```
-
-| 事件 | 结果 |
-| --- | --- |
-| 推送 tag `v1.2.0` | 构建并发布 Release，正文自动列出上一个 tag 以来的提交 |
-| 推送 tag `v1.2.0-rc.1` | 同上，但标记为 prerelease（正式版发布后客户端不会提示升级到它） |
-| 推送格式不对的 tag（如 `v1.2`） | 构建直接失败，不会产出版本号解析不出来的发布包 |
-| Actions → Release → Run workflow | 只构建、留 artifact，不发 Release（验证构建用） |
-
-**tag 格式有要求**：版本号完全来自 tag，规则在 `src/updater.py` 的 `TAG_RE` 一处定义，
-`make_version.py`（构建期）和自动升级（运行期）都用它判断：
-
-```
-v<主>.<次>.<修>[-alpha.N | -beta.N | -rc.N]     例如 v0.2.0、v1.0.0、v1.3.0-rc.1
-```
-
-不带 `v` 前缀（`1.2.3`）、少一段（`v1.2`）、多一段（`v1.2.3.4`）都会被拒。CI 会先跑
-`make_version.py --check-tag` 校验，不合法时直接标红退出。
-
-Release 里附三样东西：`MultiRDP.exe`（单文件）、`MultiRDP-vX.Y.Z-win64.zip`
-（exe + 说明文档）、`SHA256SUMS.txt`。exe 的版本号取自 tag，右键 → 属性 → 详细信息
-能看到；PyInstaller 版本在 workflow 的 `PYINSTALLER_VERSION` 里锁死，与本地
-`build.bat` 一致。CI 产物没有代码签名，首次运行 SmartScreen 会提示「未知发布者」。
-
 ## 自动升级
 
 装好的 exe 会自己检查新版本（默认开，托盘菜单可关，也可以在网页横幅里点「检查更新」）：

@@ -121,41 +121,6 @@ Every tag is built and published to
 `MultiRDP-vX.Y.Z-win64.zip` (unzip and run) or just `MultiRDP.exe` — no installer, no Python.
 `SHA256SUMS.txt` in the release carries the matching checksums.
 
-## Releasing
-
-Cutting a release is a tag push; nothing is packaged locally. `.github/workflows/release.yml`
-listens for `v*` tags, and on `windows-latest` it installs the deps, regenerates the icon,
-derives the exe version resource from the tag, builds with PyInstaller, runs `--selftest`,
-zips + hashes, and publishes the GitHub Release.
-
-```bash
-git tag v1.2.0
-git push origin v1.2.0
-```
-
-| Event | Result |
-| --- | --- |
-| Tag `v1.2.0` pushed | Builds and publishes a Release; body lists commits since the previous tag |
-| Tag `v1.2.0-rc.1` pushed | Same, flagged as a prerelease (installed clients won't auto-update to it) |
-| Malformed tag (`v1.2`) pushed | Build fails — no release with an unparsable version ever ships |
-| Actions → Release → Run workflow | Build only, artifact kept, no Release (smoke test) |
-
-**The tag format is strict** because the version number comes entirely from the tag. The rule is
-defined once (`TAG_RE` in `src/updater.py`) and shared by the build (`make_version.py`) and the
-runtime auto-updater:
-
-```
-v<major>.<minor>.<patch>[-alpha.N | -beta.N | -rc.N]     e.g. v0.2.0, v1.3.0-rc.1
-```
-
-Tags without the `v` prefix, with a missing segment (`v1.2`) or an extra one (`v1.2.3.4`) are
-rejected; CI runs `make_version.py --check-tag` first and fails loudly.
-
-Assets: `MultiRDP.exe` (single file), `MultiRDP-vX.Y.Z-win64.zip` (exe + docs) and
-`SHA256SUMS.txt`. The exe version comes from the tag (right-click → Properties → Details);
-PyInstaller is pinned via `PYINSTALLER_VERSION` in the workflow to match `build.bat`.
-CI builds are unsigned, so SmartScreen warns "unknown publisher" on first run.
-
 ## Auto-update
 
 Installed exes check GitHub for a newer release (on by default; toggle in the tray menu, or click
