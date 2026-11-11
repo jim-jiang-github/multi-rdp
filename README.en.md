@@ -13,20 +13,22 @@ colleagues their own desktop, and so on.
 > (Chinese UI: [docs/screenshot_webui.png](docs/screenshot_webui.png)).
 
 > UI overview: **Create user** generates a random account name + strong password automatically;
-> **Login** opens a separate FreeRDP window against `127.0.0.1`; **Reset** signs the session out
-> (useful when the desktop freezes); **Delete** removes the account, profile folder and registry
-> leftovers.
+> **Login** opens a separate mstsc window (Windows' built-in client); **Reset** signs the session
+> out (useful when the desktop freezes); **Delete** removes the account, profile folder and
+> registry leftovers.
 
 ## Features
 
 - **One-click user creation** — random username (`p` + 6 chars, ambiguous characters avoided),
   14-char strong password, automatically added to `Remote Desktop Users`, optionally to
   `Administrators` (so UAC only needs a click instead of a password)
-- **One-click login** — launches FreeRDP against `127.0.0.1`, one window per user. As soon as the
-  window exists it is raised to the top and activated (the client is spawned by a background
-  process and has no foreground rights, so without this it stays behind other windows); clicking
-  Login for a user that is already running simply brings that window to the front. Prefers
-  `sdl3-freerdp.exe` (correct rendering) and falls back to `wfreerdp.exe` / `mstsc`;
+- **One-click login** — launches the built-in `mstsc.exe` against the local machine, one window
+  per user. As soon as the window exists it is raised to the top and activated (the client is
+  spawned by a background process and has no foreground rights, so without this it stays behind
+  other windows); clicking Login for a user that is already running simply brings that window to
+  the front. mstsc cannot take a password on the command line, so the tool stores it with `cmdkey`
+  and gives every account its own loopback alias (`127.0.0.x`) to keep the credentials apart,
+  cleaning them up on exit;
   resolution is configurable: "auto" opens windowed at the largest common size that
   fits on the screen (1600x900 on a 1080p display); a manually picked size that does
   not fit is scaled down proportionally; only picking "fullscreen" goes fullscreen)
@@ -73,8 +75,8 @@ Self-elevates via UAC, starts the web UI in console mode and opens
 scripts\build.bat
 ```
 
-Produces `dist\MultiRDP.exe` (PyInstaller, one file, no console window). The script also copies
-the FreeRDP client from `3rd\FreeRDP\` to `dist\FreeRDP\` for you. First run:
+Produces `dist\MultiRDP.exe` (PyInstaller, one file, no console window). The remote client is
+the `mstsc.exe` that ships with Windows, so nothing else has to be copied. First run:
 
 1. Double-click `dist\MultiRDP.exe` (it requests administrator rights) — it stays in the tray
 2. Right-click the tray icon → Open Web UI
@@ -99,8 +101,7 @@ multi-rdp/
 ├── 3rd/                     # prebuilt components (usable as-is, no build needed)
 │   ├── TermWrap.dll         # multi-session patch (423 KB)
 │   ├── patchtest.exe        # offline patch self-test (27 signature checks)
-│   ├── patchlive.exe        # live patcher (patches TermService without reboot)
-│   └── FreeRDP/             # sdl3-freerdp.exe / wfreerdp.exe + license
+│   └── patchlive.exe        # live patcher (patches TermService without reboot)
 ├── scripts/
 │   ├── run.bat              # double-click run/debug
 │   ├── build.bat            # package single exe
@@ -131,76 +132,64 @@ process, the `EnableConcurrentSessions` flag, and the current session list.
 > The original value is backed up to `C:\Users\Public\termwrap_backup.json` by
 > `fix_termwrap.ps1`.
 
-## About FreeRDP
+## About the remote client
 
-`3rd/FreeRDP/` ships prebuilt FreeRDP clients (`sdl3-freerdp.exe`, `wfreerdp.exe`, ~22 MB in
-total) so the project works out of the box. The FreeRDP source tree is large and is not vendored
-here; build it yourself from <https://github.com/FreeRDP/FreeRDP> if needed. License:
-`3rd/FreeRDP/LICENSE.txt`.
+The client is `mstsc.exe`, which ships with Windows - no extra files, no third-party components.
 
-### The client sometimes shows "(Not Responding)" or vanishes
+mstsc cannot take a password on the command line, so the tool does it in two steps:
 
-With a loopback connection (client and session on the same machine) plus heavy content in that
-session (games, video), `FreeRDP: 127.0.0.1 (Not Responding)` happens. In measurements the client
-was nearly idle on CPU - the real cause is that SDL picks a GPU-accelerated renderer while the
-client shares the GPU with the remote session: when a game inside the session saturates the GPU,
-the client's frame presentation queues up forever, the main thread stops pumping messages, and
-Windows grays the window out. If it stalls long enough, FreeRDP exits on a truncated fastpath
-bitmap update (`Fastpath update Bitmap failed, status 0` in `client.log`).
+1. `cmdkey /generic:TERMSRV/<alias> /user:<account> /pass:<password>` stores the password in the
+   current user's Windows credential vault (DPAPI-encrypted, readable only by that user on that
+   machine)
+2. `mstsc /v:<alias> /w:<width> /h:<height>`
 
-We tried defaulting the client to the **SDL software renderer**
-(`SDL_RENDER_DRIVER=software`, the final blit runs on the CPU), which decouples it from the GPU
-entirely and eliminates the "Not Responding" state - but in practice it makes the client drop
-frames constantly, the larger the resolution the worse, which feels worse day-to-day than an
-occasional hang. So **GPU rendering stays the default**; a hung window usually crashes on its
-own within a minute or so and the manager reconnects it with the previous visibility (see
-below), so the session survives. If your client hangs and restarts over and over, set
-`"software_render": true` in
-`config.json` to switch to software rendering. The other measured factor is **resolution**: the
-session desktop follows the client's /w /h, so a larger window multiplies both the in-session
-rendering and the RDP capture/encode cost (1920x1080 is twice the pixels of 1280x800) - prefer a
-smaller window for heavy content. Measured on
-the same machine at the same time: the client of an idle session stayed healthy while the client
-of the game session hung repeatedly - exactly this mechanism.
+Windows keys credentials **by host name**, so pointing every account at `127.0.0.1` would make them
+overwrite each other. Instead every account gets its own fixed loopback alias (`127.0.0.0/8`
+all routes to the local machine). The mapping is persisted in `aliases.json`, which guarantees both
+that an account always gets the same alias and that no two accounts ever share one - the earlier
+`crc32 % 200` scheme collided with ~20% probability at just ten accounts, and a collision means
+"you log in and land on somebody else's desktop".
 
-What the manager does about it:
+On a clean exit the tool removes the credentials it wrote with `cmdkey /delete`. If the process was
+killed, check for leftovers with:
+
+```text
+cmdkey /list | findstr TERMSRV/127.0.0.
+```
+
+### One certificate prompt on the first connection
+
+The first loopback connection triggers mstsc's "cannot verify the identity of this remote computer"
+warning. The tool ticks "Don't ask me again for connections to this computer" and clicks Yes, after
+which it never appears again. If a localized dialog or changed wording ever defeats that automation,
+confirm it manually once - it stays silent afterwards too.
+
+### When the client exits / the window disappears
 
 - when the client process exits (crashes on its own or the window is closed with X), the
-  reconnect **preserves visibility**: a visible
-  window comes back visible and activated, a hidden one stays hidden; repeated crashes within five
-  minutes back off automatically
-- every action is logged to `client.log` ("client exited / keep-alive")
+  reconnect **preserves visibility**: a visible window comes back visible and activated, a hidden
+  one stays hidden; repeated crashes within five minutes back off automatically
+- every action is logged to `client.log` ("mstsc launch / client exited / keep-alive")
 
-One more failure mode is unrelated to load and has a very stable signature: `client.log` shows
-`Fastpath update Bitmap [1] failed, status 0`, then `sdl_client_thread_run: Failed to check
-FreeRDP event handles`, the process exits and reconnects three seconds later. That is a **known
-FreeRDP 3.32.0 defect** - newer Windows builds (26xxx/28xxx) send bitmap updates the client
-cannot parse (upstream [issue #10067](https://github.com/FreeRDP/FreeRDP/issues/10067),
-[#13883](https://github.com/FreeRDP/FreeRDP/issues/13883); fixed in releases after 3.32). The
-workaround is to leave the fastpath bitmap path alone and use the graphics pipeline instead:
+### Why not FreeRDP (history)
 
-```json
-{ "client_args": "/gfx:AVC444" }
-```
+Earlier versions used FreeRDP (`sdl3-freerdp.exe`), but **3.32.0 crashes reliably on Windows 10
+26H1 (build 28000)**: it cannot parse the fastpath bitmap updates that newer builds send.
+`client.log` shows `Fastpath update Bitmap [1] failed, status 0`, the process then dies with
+`0xc0000005` at the same offset `0x886e83` every time (upstream
+[issue #10067](https://github.com/FreeRDP/FreeRDP/issues/10067),
+[#13883](https://github.com/FreeRDP/FreeRDP/issues/13883), fixed only after 3.32).
 
-Replacing the client binary with a newer build works too, but costs far more (rebuild/re-vendor).
+Both workarounds failed:
 
-To reduce the root cause, pass extra client arguments from `config.json` (no rebuild needed):
+- `/gfx:AVC444` (graphics pipeline instead of bitmaps) - worse: crashes went from every 5 minutes
+  to every 40 seconds
+- `/relax-order-checks` (skip the bad update instead of dropping the connection) - the bad data is
+  skipped but the stream pointer never advances, so the same update is re-parsed forever: 13k log
+  lines in one minute and a completely frozen window
 
-```json
-{
-  "client_args": "/gfx:AVC444"
-}
-```
-
-- `/gfx:AVC444` — H.264 graphics pipeline instead of fastpath bitmap updates (targets the crash
-  above, but uses more GPU)
-- `/bpp:16` — 16-bit color, halves decode work and bandwidth (lower quality)
-- `-compression` — disable bulk compression, saves server CPU (bandwidth is free on loopback)
-- `/network:wan` — server pushes frames at a narrowband pace: steadier, blurrier
-
-For gaming, the effective lever is resolution: keep it at 1280×720 or below and avoid keeping many
-client windows open.
+So this version switched to mstsc and `3rd/FreeRDP/` is gone from the repo. To go back, the last
+FreeRDP implementation is the commit before `0b756dc`.
 
 ## Security notes
 
@@ -213,7 +202,8 @@ client windows open.
 ## Tech stack
 
 Python 3 (stdlib `http.server` + `ctypes`/`winreg`), pystray + Pillow (tray), PyInstaller
-(packaging), FreeRDP (RDP client); the TermWrap multi-session patch ships as a prebuilt dll.
+(packaging), mstsc (the remote desktop client built into Windows); the TermWrap multi-session patch
+ships as a prebuilt dll.
 
 ## License
 

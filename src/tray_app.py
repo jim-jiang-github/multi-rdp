@@ -125,7 +125,7 @@ if __name__ == '__main__':
         try:
             server_mod._load_cfg()
             server_mod._lang()
-            server_mod._freerdp_exe()
+            server_mod._client_exe()
             sys.exit(0)
         except Exception:
             sys.exit(1)

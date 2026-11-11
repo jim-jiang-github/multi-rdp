@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """简易用户管理 Web UI：注册 / 登录(RDP) / 删除。仅监听 127.0.0.1。"""
-import atexit, ctypes, json, os, random, re, shlex, shutil, string, subprocess, sys, threading, time, webbrowser, zlib
+import atexit, ctypes, json, os, random, re, shutil, string, subprocess, sys, threading, time, webbrowser, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8123
 HERE = os.path.dirname(os.path.abspath(__file__))
-# PyInstaller 打包成单 exe 后，users.json / config.json / FreeRDP 等数据文件
+# PyInstaller 打包成单 exe 后，users.json / config.json 等数据文件
 # 放在 exe 同目录下（可写），而不是解包临时目录里。
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
@@ -222,7 +222,7 @@ def _window_fit_limits():
     return max(800, sw - 100), max(600, sh - 140)
 
 def _rdp_geometry():
-    """按配置算出 FreeRDP 的 /w /h（fullscreen 模式不需要）。
+    """按配置算出客户端的 /w /h（fullscreen 模式不需要）。
 
     一律按「窗口化」处理：auto 从常用档位里挑能完整放进屏幕的最大尺寸
     （1080p 屏上是 1600x900），手动选的尺寸塞不进屏幕就等比缩小——
@@ -414,18 +414,12 @@ def grant_admin(name):
                 tail[-1] if tail else _t('未知错误', 'unknown error'))
         return True, None
 
-def _freerdp_exe():
-    """定位客户端：优先 sdl3-freerdp（画面渲染正常），再 wfreerdp。"""
-    dirs = (os.path.join(BASE_DIR, 'FreeRDP'),
-            os.path.join(HERE, 'FreeRDP'),
-            os.path.join(HERE, '..', '..', '3rd', 'FreeRDP'),   # 仓库 3rd/ 目录
-            r'C:\Program Files\OpenStreamMS\FreeRDP')
-    for name in ('sdl3-freerdp.exe', 'wfreerdp.exe'):
-        for d in dirs:
-            p = os.path.join(d, name)
-            if os.path.isfile(p):
-                return p
-    return None
+def _client_exe():
+    """定位远程客户端：用系统自带的 mstsc.exe（不在 PATH 里时按 System32 拼）。"""
+    p = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'mstsc.exe')
+    if os.path.isfile(p):
+        return p
+    return shutil.which('mstsc.exe')
 
 # ------------------------------------------------------------------ 客户端窗口
 # 会话是 Active 还是 Disc，只取决于「还有没有 RDP 客户端连着」：
@@ -440,7 +434,7 @@ SW_HIDE, SW_SHOW, SW_RESTORE, SW_MINIMIZE = 0, 1, 9, 6
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
 HWND_TOPMOST, HWND_NOTOPMOST = ctypes.c_void_p(-1), ctypes.c_void_p(-2)
 GW_OWNER = 4
-_CLIENT_EXES = ('sdl3-freerdp.exe', 'wfreerdp.exe', 'mstsc.exe')
+_CLIENT_EXES = ('mstsc.exe',)
 
 _user32 = ctypes.WinDLL('user32', use_last_error=True)
 _kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -528,10 +522,11 @@ _looks_cache = {}    # pid -> (是不是客户端, 时间)，枚举窗口挺贵�
 
 
 def _looks_client(pid):
-    """这个 pid 是不是远程客户端：exe 名对上，或者窗口标题里带 FreeRDP。
+    """这个 pid 是不是远程客户端：exe 名对上，或者窗口标题里带 Remote Desktop。
 
     标题这条路很重要：某些环境（安全软件、沙箱）下 QueryFullProcessImageNameW
-    会返回一个假路径，光看 exe 名会把真客户端判成别的程序。
+    会返回一个假路径，光看 exe 名会把真客户端判成别的程序。mstsc 的标题形如
+    「127.0.0.101 - Remote Desktop Connection」（中文系统是「远程桌面连接」）。
     """
     now = time.time()
     hit = _looks_cache.get(pid)
@@ -541,7 +536,8 @@ def _looks_client(pid):
     if not ok:
         try:
             for _h, _p, t in _top_windows(pid):
-                if 'freerdp' in (t or '').lower():
+                low = (t or '').lower()
+                if 'remote desktop' in low or '远程桌面' in low:
                     ok = True
                     break
         except Exception:
@@ -649,8 +645,8 @@ def _client_window(name, key=None):
     """定位某个用户的远程窗口，返回 (hwnd, pid)；找不到返回 (0, 0)。
 
     优先用记着的 pid（程序重启后会从 clients.json 接回来）；万一没有记录，
-    再退回按窗口标题认人（FreeRDP 的标题通常只有 "FreeRDP: 127.0.0.1"，
-    认不出人，所以整机只有一个客户端窗口时才认它）。
+    再退回按窗口标题认人（mstsc 的标题里只有回环地址，认不出是哪个账号，
+    所以整机只有一个客户端在连时才认它）。
     """
     _ensure_adopted()
     key = (key or name).lower()
@@ -660,7 +656,7 @@ def _client_window(name, key=None):
         if ent.get('hwnd'):
             return ent['hwnd'], pid
         wins = _top_windows(pid)
-        # SDL/FreeRDP 会顺手建几个不可见的辅助窗口；mstsc 还多出进度框、输入法窗口。
+        # 一个 mstsc 进程会建近 20 个顶层窗口（容器、进度框、输入法、声音、剪贴板…）。
         # 优先挑 TscShellContainerClass（真正显示远程桌面的那个），其次才是可见的。
         def _rank(w):
             cls = (_class_of(w[0]) or '').lower()
@@ -676,10 +672,14 @@ def _client_window(name, key=None):
     if len(hit) == 1:
         return hit[0]
     if not hit:
-        # 标题里认不出人：整机只有唯一一个远程客户端窗口时，就认它
-        allc = [(h, p) for h, p, _t in _top_windows() if _looks_client(p)]
-        if len(allc) == 1:
-            return allc[0]
+        # 标题里认不出人（mstsc 的标题是「127.0.0.x - Remote Desktop Connection」）。
+        # 只统计真正承载远程画面的 TscShellContainerClass，整机只有一个客户端时才认它。
+        # 不能按「所有顶层窗口」数——一个 mstsc 进程会顺带建近 20 个辅助窗口
+        # （输入法、声音、剪贴板、弹窗宿主…），那样永远凑不出「唯一」。
+        main = [(h, p) for h, p, _t in _top_windows()
+                if (_class_of(h) or '').lower() == 'tscshellcontainerclass']
+        if len({p for _h, p in main}) == 1:
+            return main[0]
     return 0, 0
 
 
@@ -775,18 +775,71 @@ def _hide_when_ready(key, proc):
 
 
 # ------------------------------------------------------------------ mstsc 后端
-# FreeRDP 3.32 在 Windows 26H1 上收到「脏」的快路径位图会崩（上游 #13883，3.33 才修），
-# 换微软自家的 mstsc 可以整个绕开这套解码路径。mstsc 不能从命令行收账号密码，只能：
+# 客户端固定用系统自带的 mstsc.exe。早期版本用 FreeRDP，但 3.32 在 Windows 26H1
+# 上收到「脏」的快路径位图会崩（上游 #13883，3.33 才修），而 /relax-order-checks
+# 那个开关更糟：跳过坏数据时不推进读指针，同一条更新被无限重解析（实测 1 分钟
+# 1.3 万条日志、窗口彻底卡死）。mstsc 是微软自家解码器，不踩这套路径。
+#
+# mstsc 不能从命令行收账号密码，只能：
 #   1) 先把密码写进 Windows 凭据库：cmdkey /generic:TERMSRV/<host> /user /pass
 #   2) 再 mstsc /v:<host> /w /h
-# 凭据是按「主机名」存的，所有账号都连 127.0.0.1 会互相覆盖，所以按账号名散列出
-# 一个固定的回环别名（127.0.0.0/8 整段都通到本机，效果与 127.0.0.1 完全相同）。
-def _backend():
-    return str(_load_cfg().get('backend') or 'freerdp').strip().lower()
+# 凭据是按「主机名」存的，所有账号都连 127.0.0.1 会互相覆盖，所以每个账号要分到
+# 一个自己的回环别名（127.0.0.0/8 整段都通到本机，效果与 127.0.0.1 相同）。
+ALIASES_FILE = os.path.join(BASE_DIR, 'aliases.json')
+_alias_lock = threading.Lock()
+
+
+def _load_aliases():
+    try:
+        with open(ALIASES_FILE, encoding='utf-8') as f:
+            d = json.load(f)
+        return {str(k).lower(): int(v) for k, v in d.items()}
+    except Exception:
+        return {}
 
 
 def _mstsc_host(name):
-    return '127.0.0.%d' % (2 + zlib.crc32(name.lower().encode('utf-8')) % 200)
+    """给账号分配一个固定的回环别名，映射落盘，重启后不变。
+
+    不能让 crc32 直接取模了事：两个账号撞上同一个别名时，凭据会互相覆盖，
+    表现就是「登录后进了别人的桌面」。这里改成线性探测 + 落盘保证唯一。
+    """
+    key = name.lower()
+    with _alias_lock:
+        d = _load_aliases()
+        n = d.get(key)
+        if not n:
+            used = set(d.values())
+            start = 2 + zlib.crc32(key.encode('utf-8')) % 253
+            for i in range(253):
+                cand = 2 + (start - 2 + i) % 253        # 2..254
+                if cand not in used:
+                    n = cand
+                    break
+            if not n:                                    # 253 个位置全占满（几乎不可能）
+                n = 2 + len(used) % 253
+            d[key] = n
+            try:
+                with open(ALIASES_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(d, f, ensure_ascii=False, indent=2, sort_keys=True)
+            except Exception:
+                pass
+        return '127.0.0.%d' % n
+
+
+def _purge_credentials():
+    """退出时删掉自己写进凭据库的 RDP 凭据。
+
+    不删的话密码会一直躺在 Windows 凭据管理器里，同一个用户下任何程序都能读出来。
+    """
+    try:
+        for key, n in _load_aliases().items():
+            _run(['cmdkey', '/delete:TERMSRV/127.0.0.%d' % n])
+    except Exception:
+        pass
+
+
+atexit.register(_purge_credentials)
 
 
 def _class_of(hwnd):
@@ -878,10 +931,13 @@ def _click_cert_dialog(pid, seconds=50):
 
 def _spawn_mstsc(info, hidden=False):
     """拉起 mstsc 连本机回环。"""
+    exe = _client_exe()
+    if not exe:
+        return None
     w, h = _rdp_geometry()
     host = _mstsc_host(info['name'])
     _mstsc_login(host, info['name'], info['password'])
-    args = ['mstsc.exe', '/v:' + host]
+    args = [exe, '/v:' + host]
     if w and h:
         args += ['/w:%d' % w, '/h:%d' % h]
     si = None
@@ -890,10 +946,13 @@ def _spawn_mstsc(info, hidden=False):
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         si.wShowWindow = SW_HIDE
     logf = open(os.path.join(BASE_DIR, 'client.log'), 'ab')
-    proc = subprocess.Popen(
-        args, cwd=os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32'),
-        stdout=logf, stderr=logf, startupinfo=si,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    try:
+        proc = subprocess.Popen(
+            args, cwd=os.path.dirname(exe),
+            stdout=logf, stderr=logf, startupinfo=si,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    finally:
+        logf.close()            # 句柄已复制给子进程，父进程这份要关掉
     threading.Thread(target=_click_cert_dialog, args=(proc.pid,), daemon=True).start()
     _log('mstsc 启动 %s -> %s (%sx%s)' % (info['name'], host, w or 0, h or 0))
     return proc
@@ -901,52 +960,7 @@ def _spawn_mstsc(info, hidden=False):
 
 def _spawn_client(info, hidden=False):
     """拉起远程客户端，返回 Popen（失败返回 None）。"""
-    if _backend() == 'mstsc':
-        return _spawn_mstsc(info, hidden=hidden)
-    pwd = info['password']
-    exe = _freerdp_exe()
-    if not exe:
-        return None
-    # mstsc 连本机回环会立刻断开会话（reason code 17）；旧的 wfreerdp 画面全黑，
-    # 只有 sdl3-freerdp 能正常渲染，所以按优先级选客户端。
-    w, h = _rdp_geometry()
-    args = [exe, '/v:127.0.0.1', '/u:' + info['name'],
-            '/d:' + os.environ.get('COMPUTERNAME', '.'),
-            '/p:' + pwd, '/cert:ignore',
-            '/bpp:32', '/network:lan',
-            '/audio-mode:redirect', '/log-level:ERROR']
-    # 画质/兼容性实验用的口子：config.json 里写 "client_args": "..." 就拼在命令行后面，
-    # 不用重打包。例如 "/gfx:AVC444"（走图形管线，避开 fastpath 位图）、"-compression"。
-    extra = str(_load_cfg().get('client_args') or '').strip()
-    if extra:
-        try:
-            args += shlex.split(extra, posix=True)
-        except ValueError:
-            args += extra.split()
-    if w and h:
-        args += ['/w:%d' % w, '/h:%d' % h]
-    else:
-        args += ['/f']            # 全屏模式
-    # SDL 默认挑 GPU 加速的渲染后端（快）。回环场景里客户端和远程会话共用同一块
-    # GPU：会话里跑游戏把 GPU 占满时，客户端的 present 会排队，主线程被卡住，
-    # 表现为窗口「未响应」（实测 CPU 空闲、8 个线程停在 EventPairLow）。
-    # 但实测软件渲染（blit 放到 CPU）会让客户端持续掉帧变卡——分辨率越大越明显，
-    # 日常体验比偶尔卡死更糟，所以默认仍走 GPU 渲染；卡住的窗口一般几十秒后自己
-    # 崩掉，由 _watch_client 保活线程按原可见性重连，会话不丢。
-    # 实在反复卡死就在 config.json 里写 "software_render": true 换回软件渲染。
-    env = os.environ.copy()
-    if _load_cfg().get('software_render', False):
-        env['SDL_RENDER_DRIVER'] = 'software'
-    si = None
-    if hidden:
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = SW_HIDE
-    logf = open(os.path.join(BASE_DIR, 'client.log'), 'ab')
-    return subprocess.Popen(
-        args, cwd=os.path.dirname(exe), stdout=logf, stderr=logf,
-        startupinfo=si, env=env,
-        creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
+    return _spawn_mstsc(info, hidden=hidden)
 
 
 def _connect(info, hidden=False, auto=False, reveal=False):
@@ -960,8 +974,8 @@ def _connect(info, hidden=False, auto=False, reveal=False):
     except Exception as e:
         return False, _t('启动远程窗口失败: ', 'Failed to launch remote window: ') + str(e)
     if proc is None:
-        return False, _t('找不到 FreeRDP 客户端（3rd/FreeRDP 缺失）',
-                         'FreeRDP client not found (3rd/FreeRDP missing)')
+        return False, _t('找不到 mstsc.exe（系统缺少远程桌面客户端）',
+                         'mstsc.exe not found (remote desktop client missing)')
     time.sleep(3.0)
     if proc.poll() is not None:
         return False, _t('远程窗口启动后立即退出，详见 client.log',
@@ -1029,10 +1043,8 @@ def _watch_client(key, proc, info, was_hidden=True):
     客户端自己退出有两种情况：
       · 用户点了窗口的 X —— 会话变 Disc；想「关掉窗口后台还激活」，就在后台悄悄
         重连一次（窗口隐藏），桌面上什么都不会弹出来；
-      · 客户端崩溃 —— FreeRDP 在重画面（游戏/视频）下会因 fastpath 位图更新解析
-        失败而直接退出，日志里是 "Fastpath update Bitmap failed, status 0"。这时
-        窗口会先卡成「未响应」再消失，必须把窗口按原样接回来，否则用户看到的就是
-        「经常没响应，然后窗口没了」。
+      · 客户端崩溃（渲染线程异常、显卡驱动重置等）—— 进程直接退出。这时窗口会
+        先卡住再消失，必须把窗口按原样接回来，否则用户看到的就是「窗口突然没了」。
     """
     proc.wait()
     with _lock:
@@ -1088,24 +1100,11 @@ def login_user(name):
     if not info.get('password'):
         return False, _t('该用户没有保存密码，无法一键登录（可删除后重新注册）',
                          'This user has no saved password, one-click login is unavailable (delete and re-create it)')
-    if not _freerdp_exe():
-        return _mstsc_connect(info)
+    if not _client_exe():
+        return False, _t('找不到 mstsc.exe（系统缺少远程桌面客户端）',
+                         'mstsc.exe not found (remote desktop client missing)')
     # reveal：窗口一建好就翻到前台并激活，否则它会悄悄躲在别的窗口后面
     return _connect(info, reveal=True)
-
-
-def _mstsc_connect(info):
-    """兜底：没有 FreeRDP 就用 mstsc。"""
-    _run(['cmdkey', '/generic:TERMSRV/127.0.0.2', '/user:' + info['name'],
-          '/pass:' + info['password']])
-    w, h = _rdp_geometry()
-    geom = ['/w:%d' % w, '/h:%d' % h] if (w and h) else ['/f']
-    try:
-        subprocess.Popen(['mstsc', '/v:127.0.0.2'] + geom,
-                         creationflags=subprocess.CREATE_NO_WINDOW)
-    except Exception as e:
-        return False, _t('启动远程窗口失败: ', 'Failed to launch remote window: ') + str(e)
-    return True, None
 
 
 def _track(name, hwnd, pid, hidden):
