@@ -32,6 +32,8 @@ MANIFEST
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# MultiRDP.spec 是手写维护的构建入口（图标、内嵌资源都在里面），需要入库
+!MultiRDP.spec
 
 # Installer logs
 pip-log.txt

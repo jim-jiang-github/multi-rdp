@@ -67,6 +67,10 @@ scripts\build.bat
 1. 双击 `dist\MultiRDP.exe`（自动请求管理员权限），程序驻留托盘
 2. 托盘右键 → 打开 Web UI
 
+图标由 `scripts/make_icon.py` 矢量绘制（超采样后降采样，16px 不发糊），`build.bat`
+每次打包前自动重新生成 `assets/multirdp.ico` 与 `assets/tray.png`；构建参数集中在
+`MultiRDP.spec`。想换配色或改格子数量，改脚本里的常量重跑即可。
+
 ### 方式三：直接跑 Python
 
 ```powershell
@@ -90,10 +94,16 @@ multi-rdp/
 │   └── patchlive.exe        # 活体补丁器（不重启给 TermService 打补丁）
 ├── scripts/
 │   ├── run.bat              # 双击运行/调试
-│   ├── build.bat            # 打包单 exe
+│   ├── build.bat            # 打包单 exe（图标生成 → PyInstaller）
+│   ├── make_icon.py         # 矢量绘制应用图标，产出 assets/*.ico|png
 │   ├── fix_termwrap.bat     # 设置 ServiceDll 持久化（重启后自动生效）
 │   ├── rollback_termwrap.bat# 回滚 ServiceDll 到原值
 │   └── check_termwrap.ps1   # 检查 TermWrap 加载状态与并发会话开关
+├── assets/
+│   ├── multirdp.ico         # 多尺寸应用图标（16/24/32/48/64/128/256）
+│   ├── multirdp.png         # 1024px 主图
+│   └── tray.png             # 托盘专用简化版（16px 可读）
+├── MultiRDP.spec            # PyInstaller 构建入口（挂图标 + 内嵌 tray.png）
 └── docs/                    # 截图等文档资源
 ```
 

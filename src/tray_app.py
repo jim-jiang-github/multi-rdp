@@ -44,16 +44,35 @@ def _elevate_and_exit():
         'MultiRDP', 0x48)   # MB_ICONWARNING | MB_TOPMOST
 
 
+def _resource(*parts):
+    """定位随包资源：打包态取 _MEIPASS，开发态取仓库根目录。"""
+    if getattr(sys, 'frozen', False):
+        base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(sys.executable)))
+    else:
+        base = os.path.dirname(HERE)
+    return os.path.join(base, *parts)
+
+
 def _icon_image():
-    """程序生成的托盘图标：紫色圆角屏幕 + 白色窗口。"""
-    from PIL import Image, ImageDraw
+    """托盘图标：assets/tray.png（单屏简化版，16px 可读）。
+
+    读不到时退化为程序绘制的同配色简易图标，保证托盘不会空白。
+    """
+    from PIL import Image
+    p = _resource('assets', 'tray.png')
+    if os.path.isfile(p):
+        try:
+            return Image.open(p).convert('RGBA')
+        except Exception:
+            pass
     img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+    from PIL import ImageDraw
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([4, 6, 60, 44], radius=7, fill=(83, 74, 183, 255))
-    d.rectangle([12, 14, 52, 34], fill=(255, 255, 255, 255))
-    d.rectangle([12, 14, 52, 19], fill=(126, 117, 214, 255))
-    d.polygon([(28, 44), (36, 44), (38, 52), (26, 52)], fill=(83, 74, 183, 255))
-    d.rounded_rectangle([20, 52, 44, 57], radius=2, fill=(83, 74, 183, 255))
+    d.rounded_rectangle([2, 2, 61, 61], radius=15, fill=(23, 36, 57, 255))
+    d.rounded_rectangle([10, 14, 53, 40], radius=9, outline=(79, 192, 232, 255), width=6)
+    d.rectangle([30, 40, 33, 47], fill=(79, 192, 232, 255))
+    d.rounded_rectangle([21, 46, 42, 51], radius=2, fill=(79, 192, 232, 255))
+    d.rounded_rectangle([35, 8, 57, 26], radius=4, fill=(61, 230, 168, 255))
     return img
 
 

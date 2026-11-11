@@ -104,10 +104,16 @@ multi-rdp/
 │   └── patchlive.exe        # live patcher (patches TermService without reboot)
 ├── scripts/
 │   ├── run.bat              # double-click run/debug
-│   ├── build.bat            # package single exe
+│   ├── build.bat            # package single exe (icon -> PyInstaller)
+│   ├── make_icon.py         # vector-drawn app icon, emits assets/*.ico|png
 │   ├── fix_termwrap.bat     # persist ServiceDll (effective after reboot)
 │   ├── rollback_termwrap.bat# restore the original ServiceDll
 │   └── check_termwrap.ps1   # check TermWrap load state / concurrent sessions flag
+├── assets/
+│   ├── multirdp.ico         # multi-size app icon (16/24/32/48/64/128/256)
+│   ├── multirdp.png         # 1024px master
+│   └── tray.png             # simplified tray variant (readable at 16px)
+├── MultiRDP.spec            # PyInstaller entry point (icon + bundled tray.png)
 └── docs/                    # screenshots and docs assets
 ```
 
