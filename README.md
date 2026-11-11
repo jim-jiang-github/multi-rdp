@@ -123,41 +123,6 @@ Release 里的 `SHA256SUMS.txt` 是对应的校验值。
 - 已断开的会话不受影响：升级重启后数据还在 `%LOCALAPPDATA%\MultiRDP`，卡片照样有最后一帧
 - 没有版本号的构建（本地 `build.bat` 打的、直接跑源码的）视为开发版，不参与自动升级
 
-## 项目结构
-
-```text
-multi-rdp/
-├── src/
-│   ├── tray_app.py          # 托盘程序入口（pystray）
-│   ├── updater.py           # 自动升级：查 Release → 下载 → SHA256 → 就地替换
-│   └── webui/
-│       ├── server.py        # Web UI + 用户管理核心（127.0.0.1:8123）
-│       ├── screencap.py     # 纯 ctypes GDI 截屏小工具
-│       ├── thumb.py         # 抓远程窗口画面 → JPEG 缩略图（卡片预览用）
-│       ├── config.json      # 界面配置（admin_default / lang / resolution）
-│       └── users.json.example  # 用户库模板（真实 users.json 不入库）
-├── 3rd/                     # 预编译组件（直接可用，无需本地编译）
-│   ├── TermWrap.dll         # 多会话补丁（423 KB）
-│   ├── patchtest.exe        # 离线补丁自检（27 特征码验证）
-│   └── patchlive.exe        # 活体补丁器（不重启给 TermService 打补丁）
-├── scripts/
-│   ├── run.bat              # 双击运行/调试
-│   ├── build.bat            # 打包单 exe（图标生成 → PyInstaller）
-│   ├── make_icon.py         # 矢量绘制应用图标，产出 assets/*.ico|png
-│   ├── make_version.py      # 按 tag 生成 exe 版本资源（CI 打包时用）
-│   ├── fix_termwrap.bat     # 设置 ServiceDll 持久化（重启后自动生效）
-│   ├── rollback_termwrap.bat# 回滚 ServiceDll 到原值
-│   └── check_termwrap.ps1   # 检查 TermWrap 加载状态与并发会话开关
-├── assets/
-│   ├── multirdp.ico         # 多尺寸应用图标（16/24/32/48/64/128/256）
-│   ├── multirdp.png         # 1024px 主图
-│   └── tray.png             # 托盘专用简化版（16px 可读）
-├── MultiRDP.spec            # PyInstaller 构建入口（挂图标 + 内嵌 tray.png）
-├── .github/workflows/
-│   └── release.yml          # 打 tag 自动构建并发布 Release
-└── docs/                    # 截图等文档资源
-```
-
 ## 多会话补丁（TermWrap）
 
 Windows 客户端版默认只允许一个远程会话。`TermWrap.dll` 通过运行时给 `termsrv.dll`

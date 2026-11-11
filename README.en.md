@@ -135,41 +135,6 @@ the banner in the web UI):
   `--after-update <pid>` so it waits for the old one to exit, then cleans up `.old`
 - no version resource (local `build.bat` output, or plain `python`) = dev build, auto-update off
 
-## Project layout
-
-```text
-multi-rdp/
-├── src/
-│   ├── tray_app.py          # tray app entry point (pystray)
-│   ├── updater.py           # auto-update: check Release -> download -> SHA256 -> in-place swap
-│   └── webui/
-│       ├── server.py        # web UI + user management core (127.0.0.1:8123)
-│       ├── screencap.py     # pure-ctypes GDI screenshot helper
-│       ├── thumb.py         # capture a remote window -> JPEG thumbnail (card preview)
-│       ├── config.json      # UI config (admin_default / lang / resolution)
-│       └── users.json.example  # user DB template (real users.json is ignored)
-├── 3rd/                     # prebuilt components (usable as-is, no build needed)
-│   ├── TermWrap.dll         # multi-session patch (423 KB)
-│   ├── patchtest.exe        # offline patch self-test (27 signature checks)
-│   └── patchlive.exe        # live patcher (patches TermService without reboot)
-├── scripts/
-│   ├── run.bat              # double-click run/debug
-│   ├── build.bat            # package single exe (icon -> PyInstaller)
-│   ├── make_icon.py         # vector-drawn app icon, emits assets/*.ico|png
-│   ├── make_version.py      # exe version resource from the tag (used by CI)
-│   ├── fix_termwrap.bat     # persist ServiceDll (effective after reboot)
-│   ├── rollback_termwrap.bat# restore the original ServiceDll
-│   └── check_termwrap.ps1   # check TermWrap load state / concurrent sessions flag
-├── assets/
-│   ├── multirdp.ico         # multi-size app icon (16/24/32/48/64/128/256)
-│   ├── multirdp.png         # 1024px master
-│   └── tray.png             # simplified tray variant (readable at 16px)
-├── MultiRDP.spec            # PyInstaller entry point (icon + bundled tray.png)
-├── .github/workflows/
-│   └── release.yml          # tag push -> build -> GitHub Release
-└── docs/                    # screenshots and docs assets
-```
-
 ## Multi-session patch (TermWrap)
 
 Windows client editions allow only one remote session. `TermWrap.dll` runtime-patches
