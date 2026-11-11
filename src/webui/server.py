@@ -1734,7 +1734,18 @@ button:disabled{opacity:.5;cursor:default}
 .hint{color:var(--sub);font-size:13px;line-height:1.6}
 #banner{display:none;background:#fdf3e3;border:1px solid #f2ddb8;color:#8a5a12;font-size:13px;padding:10px 14px;border-radius:10px;margin-bottom:16px;line-height:1.6}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(292px,1fr));gap:16px}
-.ucard{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(20,20,50,.05);display:flex;flex-direction:column;transition:box-shadow .18s,border-color .18s}
+.ucard{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(20,20,50,.05);display:flex;flex-direction:column;transition:box-shadow .18s,border-color .18s;position:relative}
+/* 删除进行中：整卡轻微呼吸缩放 + 蒙层进度条 */
+.ucard.deleting{animation:delpulse 1.6s ease-in-out infinite}
+.ucard.deleting .shot,.ucard.deleting .cbody{opacity:.42;transition:opacity .35s}
+.delover{position:absolute;inset:0;z-index:6;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(15,18,32,.42);backdrop-filter:blur(1.5px)}
+.ucard.deleting .delover{display:flex}
+.deltxt{font-size:12.5px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.45)}
+.delbar{width:64%;height:6px;border-radius:99px;background:rgba(255,255,255,.28);overflow:hidden}
+.delbar i{display:block;height:100%;width:0;border-radius:99px;background:var(--brand);transition:width .25s linear}
+.delbar.indet i{width:32%;animation:delind 1.1s linear infinite}
+@keyframes delind{from{transform:translateX(-110%)}to{transform:translateX(330%)}}
+@keyframes delpulse{50%{transform:scale(.982)}}
 .ucard:hover{box-shadow:0 6px 18px rgba(20,20,50,.10);border-color:#d8dbe9}
 /* 缩略图：整幅画面按比例缩进卡片，比例对不上就留黑边（contain），绝不裁剪/拉伸 */
 .shot{position:relative;aspect-ratio:16/10;background:#0a0f19;cursor:pointer;overflow:hidden}
@@ -2175,11 +2186,14 @@ el.innerHTML='<div class="shot" onclick="focusUser(\''+name+'\')" title="'+t('sh
 '<span class="stamp"></span></div>'+
 '<div class="cbody"><div class="cname"><span class="nm"></span>'+
 '<span class="tag adm" style="display:none">'+t('admin')+'</span></div>'+
-'<div class="acts"></div></div>';
+'<div class="acts"></div></div>'+
+'<div class="delover"><div class="deltxt"></div><div class="delbar"><i></i></div></div>';
 const c={name:name,el:el,shot:el.querySelector('.shot'),img:el.querySelector('img'),
 ph:el.querySelector('.ph'),pht:el.querySelector('.pht'),veil:el.querySelector('.veil'),
 badge:el.querySelector('.badge'),stamp:el.querySelector('.stamp'),
-acts:el.querySelector('.acts'),adm:el.querySelector('.adm'),nm:el.querySelector('.nm'),user:null};
+acts:el.querySelector('.acts'),adm:el.querySelector('.adm'),nm:el.querySelector('.nm'),user:null,
+delover:el.querySelector('.delover'),deltxt:el.querySelector('.deltxt'),
+delbar:el.querySelector('.delbar'),delbarI:el.querySelector('.delbar i')};
 cards[name]=c;
 return c;
 }
@@ -2196,20 +2210,21 @@ const noWin=u.window==='none';
 const off=!u.connected;
 const hasPic=!!c.img.dataset.url;
 /* 画面留着：断开/隐藏只在上面压一层灰，绝不把图撤掉——断开前最后那一帧就是这个卡片的样子 */
-let cls='shot';
-if(bg||noWin||off)cls+=' is-dim';
-if(!hasPic)cls+=' veil-on';
-c.shot.className=cls;
 const st=u.pending?t('pending'):(bg?t('bg'):(u.online?t('online'):(u.connected?t('disconnected'):t('offline'))));
 const stTitle=bg?t('tagBgTitle'):(u.online?t('tagActiveTitle'):(u.connected?t('tagDiscTitle'):(u.pending?t('tagPendTitle'):t('tagOffTitle'))));
 c.badge.textContent=st;
 c.badge.title=stTitle;
 c.badge.style.color=u.pending?'#f0c27b':(u.online?'#8ce8c4':(u.connected?'#f2d19b':'#cfd5e6'));
-/* 只有盖在画面上时 veil 才带文字；没画面时由占位符 pht 显示，避免同一句出现两遍 */
-c.veil.textContent=hasPic?'':(u.pending?t('pending'):(bg?t('shotHidden'):(noWin?(u.connected?t('shotOff'):t('shotNone')):t('shotWait'))));
+const phTxt=u.pending?t('pending'):(bg?t('shotHidden'):(noWin?(u.connected?t('shotOff'):t('shotNone')):(u.connected?t('shotWait'):t('shotOff'))));
+c.pht.textContent=phTxt;
+/* 没画面：占位符（图标+文字）；有画面但断开/隐藏：最后一帧压灰 + veil 提示 */
+c.veil.textContent=(hasPic&&(bg||off))?(bg?t('shotHidden'):t('shotOff')):'';
+let cls='shot';
+if(bg||noWin||off)cls+=' is-dim';
+if(hasPic&&(bg||off))cls+=' veil-on';
+c.shot.className=cls;
 if(hasPic){c.ph.style.display='none';c.img.classList.add('ready')}
-else{c.ph.style.display='flex';
-c.pht.textContent=u.pending?'':(noWin?(u.connected?t('shotOff'):t('shotNone')):t('shotWait'))}
+else{c.ph.style.display='flex'}
 const q='\''+u.name+'\'';
 let inner='';
 if(u.pending){
@@ -2340,10 +2355,53 @@ const r=await api('grant',{name:name});
 msg(r.ok?t('grantOk',{name:name}):t('grantFail')+r.error,r.ok?'ok':'err');
 refresh();
 }
+/* 删除耗时记忆：第一次没数据→无限等待式进度条；之后按上次耗时推算进度。
+   每个账号各记一份（文件多的账号删得慢），另存一份全局平均兜底 */
+const DEL_KEY='multirdp_del_ms';
+function delStats(){try{return JSON.parse(localStorage.getItem(DEL_KEY))||{}}catch(e){return{}}}
+function delEstimate(name){
+const s=delStats();
+if(s.per&&s.per[name])return s.per[name];
+return s.avg||0;
+}
+function delRemember(name,ms){
+const s=delStats();
+s.per=s.per||{};
+s.per[name]=s.per[name]?Math.round(s.per[name]*.4+ms*.6):Math.round(ms);
+s.avg=s.avg?Math.round(s.avg*.5+ms*.5):Math.round(ms);
+try{localStorage.setItem(DEL_KEY,JSON.stringify(s))}catch(e){}
+}
+let delAnim=null;
+function delStart(c,est){
+c.el.classList.add('deleting');
+c.deltxt.textContent=t('deleting',{name:c.name});
+c.delbar.classList.toggle('indet',!(est>0));
+c.delbarI.style.width=est>0?'2%':'32%';
+if(est>0){
+const t0=performance.now();
+delAnim=setInterval(function(){
+const el=performance.now()-t0;
+if(el>est*1.35){   // 估算明显不准：降级成无限等待式
+c.delbar.classList.add('indet');c.delbarI.style.width='32%';
+clearInterval(delAnim);delAnim=null;return}
+c.delbarI.style.width=(Math.min(el/est,0.94)*100).toFixed(1)+'%';
+},120);
+}
+}
+function delStop(c){
+c.el.classList.remove('deleting');
+if(delAnim){clearInterval(delAnim);delAnim=null}
+c.delbarI.style.width='0';
+}
 async function del(name){
 if(!confirm(t('delConfirm',{name:name})))return;
+const c=cards[name]||null;
+if(c)delStart(c,delEstimate(name));
+const t0=performance.now();
 msg(t('deleting',{name:name}));
 const r=await api('delete',{name:name});
+delRemember(name,Math.max(300,performance.now()-t0));
+if(c)delStop(c);
 msg(r.ok?(t('deleted',{name:name})+(r.error?'（'+r.error+'）':'')):t('delFail')+r.error,r.ok?(r.error?'err':'ok'):'err');
 refresh();
 }
