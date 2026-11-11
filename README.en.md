@@ -37,12 +37,11 @@ colleagues their own desktop, and so on.
   connection stays up, so the session remains `Active`: programs keep rendering and keep their
   focus, while the window disappears from the taskbar and Alt+Tab. "Show window" brings it back
   unchanged. Clicking the window's X really does drop the connection (session becomes
-  `Disc`, which has no input channel and no real focus); the tool then reconnects once in the
-  background to put the session back to `Active`, keeping the window's previous visibility
-  (visible stays visible, hidden stays hidden; disable with `keep_alive: false` in
-  `config.json`). Only Reset signs the session out and ends those programs. Window ownership
-  and the hidden flag are stored in `clients.json`, so after the manager restarts it re-adopts
-  the existing windows and "Show window" still works
+  `Disc`, which has no input channel and no real focus) and the tool **will not bring it back** -
+  click Login to reopen it. Only Reset signs the session out and ends those programs. Window
+  ownership is stored in `clients.json`; even if that record is stale (mstsc was closed and
+  reopened, the manager moved to another folder), on restart the window is re-adopted by
+  matching the loopback address in its title, so "Show window" still works
 - **Session reset** — logs the user's session off to recover from a black/frozen screen; the
   next login starts a fresh desktop
 - **Clean user deletion** — logoff → delete account → delete profile via WMI → force-remove

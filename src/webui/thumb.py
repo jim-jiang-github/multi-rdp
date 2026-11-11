@@ -126,6 +126,47 @@ def _grab(hwnd):
         _user32.ReleaseDC(hwnd, src_dc)
 
 
+def _trim_letterbox(img, tol=16, max_frac=0.34):
+    """削掉 mstsc 画在客户区里的信箱黑边。
+
+    窗口被拉得比远程分辨率大的时候，mstsc 不会放大画面，而是把它居中、四周填黑。
+    抓客户区就会连这圈黑边一起抓下来，卡片上看着就是「中间一小块画面，剩下都是
+    黑的」——明明窗口是铺满的。
+
+    按行/列亮度从四边往里削；最多削 max_frac，而且削完必须还剩一半以上的面积，
+    否则宁可不动（黑壁纸、锁屏、刚连上还没画出来的黑屏都会满足「整行全黑」）。
+    """
+    w, h = img.size
+    px = img.load()
+    sx = max(1, w // 48)
+    sy = max(1, h // 48)
+
+    def row_black(y):
+        return all(max(px[x, y][:3]) <= tol for x in range(0, w, sx))
+
+    def col_black(x):
+        return all(max(px[x, y][:3]) <= tol for y in range(0, h, sy))
+
+    top = 0
+    while top < h * max_frac and row_black(top):
+        top += 1
+    bot = h
+    while h - bot < h * max_frac and row_black(bot - 1):
+        bot -= 1
+    left = 0
+    while left < w * max_frac and col_black(left):
+        left += 1
+    right = w
+    while w - right < w * max_frac and col_black(right - 1):
+        right -= 1
+
+    if (left, top, right, bot) == (0, 0, w, h):
+        return img
+    if right - left < w * 0.5 or bot - top < h * 0.5:
+        return img
+    return img.crop((left, top, right, bot))
+
+
 def _looks_blank(img):
     """全黑/几乎无内容：拿不到真实画面（窗口刚创建、最小化、渲染还没起来）。"""
     small = img.convert('L').resize((32, 20))
@@ -164,6 +205,8 @@ def render(name, hwnd, max_w=520, quality=68, ttl=3.0):
         return None, 'none'
     if _looks_blank(img):
         return None, 'none'
+
+    img = _trim_letterbox(img)
 
     w, h = img.size
     if w > max_w:

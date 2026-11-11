@@ -449,6 +449,8 @@ _user32.GetWindow.restype = ctypes.c_void_p
 _user32.GetWindowTextLengthW.argtypes = [ctypes.c_void_p]
 _user32.GetWindowTextW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
 _user32.IsWindowVisible.argtypes = [ctypes.c_void_p]
+_user32.IsWindow.argtypes = [ctypes.c_void_p]
+_user32.IsWindow.restype = ctypes.c_bool
 _user32.IsIconic.argtypes = [ctypes.c_void_p]
 _user32.GetForegroundWindow.restype = ctypes.c_void_p
 _user32.AttachThreadInput.argtypes = [ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int]
@@ -470,11 +472,6 @@ _user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_in
 _user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_size_t]
 _user32.SendMessageW.restype = ctypes.c_void_p
 _user32.EnumChildWindows.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
-
-
-def _keep_alive():
-    """用户直接点窗口 X 之后，是否在后台自动重连一次（保住 Active），默认开。"""
-    return bool(_load_cfg().get('keep_alive', True))
 
 
 _exe_cache = {}      # pid -> (exe 名, 取的时间)，状态接口每 2s 轮询一次，别每次都去查进程
@@ -614,6 +611,52 @@ def _adopt_clients():
     _save_clients()
 
 
+def _adopt_by_title():
+    """启动时把「远程还开着、但 pid 记录对不上」的窗口接回来。
+
+    _adopt_clients 只认 clients.json 里记的 pid：mstsc 被关掉重开、程序换过目录、
+    配置被清掉，pid 就全废了，卡片会一直显示「未连接」——即使远程窗口好好开着。
+    这里按标题里的回环地址再扫一遍，能救回来的顺手把记录补上。
+    """
+    try:
+        alias = _load_aliases()
+    except Exception:
+        return
+    if not alias:
+        return
+    try:
+        wins = [(h, p, t or '') for h, p, t in _top_windows()
+                if (_class_of(h) or '').lower() == 'tscshellcontainerclass']
+    except Exception:
+        return
+    if not wins:
+        return
+    for key, n in list(alias.items()):
+        key = str(key).lower()
+        ent = _clients.get(key)
+        if _alive(ent) and ent.get('hwnd') and _user32.IsWindow(ent['hwnd']):
+            continue
+        try:
+            pat = re.compile(r'127\.0\.0\.%d(?!\d)' % int(n))
+        except Exception:
+            continue
+        for hwnd, pid, title in wins:
+            if not pat.search(title):
+                continue
+            if ent is None:
+                ent = {'proc': None, 'pid': pid, 'hwnd': hwnd,
+                       'hidden': not bool(_user32.IsWindowVisible(hwnd)),
+                       'intent': '', 'auto': False, 't0': 0}
+                _clients[key] = ent
+                _log('adopt %s: 按标题接管 hwnd %s（pid %s）' % (key, hwnd, pid))
+            else:
+                ent['hwnd'] = hwnd
+                if not ent.get('proc'):
+                    ent['pid'] = pid
+                _log('adopt %s: 按标题补回 hwnd %s' % (key, hwnd))
+            break
+
+
 _adopted = False
 
 
@@ -622,6 +665,7 @@ def _ensure_adopted():
     if not _adopted:
         _adopted = True
         _adopt_clients()
+        _adopt_by_title()
 
 
 def _top_windows(pid=None):
@@ -646,6 +690,31 @@ def _top_windows(pid=None):
     return out
 
 
+def _hwnd_by_title(name):
+    """按窗口标题里的回环地址，找出这个账号的远程窗口 → (hwnd, pid)。
+
+    mstsc 的标题形如「127.0.0.119 - Remote Desktop Connection」，而每个账号连哪个
+    回环地址在 aliases.json 里是定死的，所以标题本身就够认出是谁。这条路不依赖
+    进程表：程序重启过、mstsc 被关掉重开、clients.json 丢了，pid 全对不上也能认回来。
+    """
+    key = (name or '').lower()
+    try:
+        n = _load_aliases().get(key)
+    except Exception:
+        return 0, 0
+    if not n:
+        return 0, 0
+    try:
+        pat = re.compile(r'127\.0\.0\.%d(?!\d)' % int(n))
+        for hwnd, pid, title in _top_windows():
+            if (_class_of(hwnd) or '').lower() == 'tscshellcontainerclass' \
+                    and pat.search(title or ''):
+                return hwnd, pid
+    except Exception:
+        pass
+    return 0, 0
+
+
 def _client_window(name, key=None):
     """定位某个用户的远程窗口，返回 (hwnd, pid)；找不到返回 (0, 0)。
 
@@ -658,7 +727,7 @@ def _client_window(name, key=None):
     ent = _clients.get(key)
     if _alive(ent):
         pid = _pid_of(ent)
-        if ent.get('hwnd'):
+        if ent.get('hwnd') and _user32.IsWindow(ent['hwnd']):
             return ent['hwnd'], pid
         wins = _top_windows(pid)
         # 一个 mstsc 进程会建近 20 个顶层窗口（容器、进度框、输入法、声音、剪贴板…）。
@@ -671,6 +740,15 @@ def _client_window(name, key=None):
         if wins:
             return wins[0][0], pid
         return 0, pid
+    # 记录里的 pid 已经失效（程序重启过、mstsc 被关掉重开）：按标题里的回环地址再认一次
+    thr_hwnd, thr_pid = _hwnd_by_title(key)
+    if thr_hwnd:
+        if ent is not None:
+            ent['hwnd'] = thr_hwnd
+            if not ent.get('proc'):
+                ent['pid'] = thr_pid
+        return thr_hwnd, thr_pid
+
     low = name.lower()
     hit = [(h, p) for h, p, title in _top_windows()
            if low in title.lower() and _looks_client(p)]
@@ -702,9 +780,20 @@ def _owned_hwnd(name):
     key = (name or '').lower()
     ent = _clients.get(key)
     if _alive(ent):
-        if ent.get('hwnd'):
+        if ent.get('hwnd') and _user32.IsWindow(ent['hwnd']):
             return ent['hwnd']
         hwnd, _pid = _client_window(name)
+        if hwnd:
+            ent['hwnd'] = hwnd
+            return hwnd
+    # pid 记录对不上（程序重启过 / mstsc 重开过 / clients.json 丢了）：
+    # 按标题里的回环地址认，这条路不看进程表
+    hwnd, pid = _hwnd_by_title(key)
+    if hwnd:
+        if ent is not None:
+            ent['hwnd'] = hwnd
+            if not ent.get('proc'):
+                ent['pid'] = pid
         return hwnd
     st = _sessions().get(key) or {}
     if st.get('state') != 'active':
@@ -1025,7 +1114,7 @@ def _connect(info, hidden=False, auto=False, reveal=False):
 
 
 def _kill_client(key):
-    """主动关掉客户端进程，并打标记，避免保活线程又把它拉起来。"""
+    """主动关掉客户端进程（删除用户 / 切换会话时用）。"""
     ent = _clients.pop(key, None)
     if not ent:
         return
@@ -1071,47 +1160,20 @@ def _show_when_ready(key, proc):
 
 
 def _watch_client(key, proc, info, was_hidden=True):
-    """盯着客户端进程。
+    """盯着客户端进程，退出后把记录清掉。
 
-    客户端自己退出有两种情况：
-      · 用户点了窗口的 X —— 会话变 Disc；想「关掉窗口后台还激活」，就在后台悄悄
-        重连一次（窗口隐藏），桌面上什么都不会弹出来；
-      · 客户端崩溃（渲染线程异常、显卡驱动重置等）—— 进程直接退出。这时窗口会
-        先卡住再消失，必须把窗口按原样接回来，否则用户看到的就是「窗口突然没了」。
+    只清理、不保活：用户点 X 关掉窗口就是关掉了（想回去点「登录」），客户端崩了
+    也不再自动拉起。之前那套「退出后悄悄在后台重连」会让关掉的窗口复活，用户
+    明确不要。
     """
     proc.wait()
     with _lock:
         ent = _clients.get(key)
         if not ent or ent.get('proc') is not proc:
             return
-        intent, auto, t0 = ent.get('intent'), ent.get('auto'), ent.get('t0', 0)
         _clients.pop(key, None)
     _save_clients()
-    if intent or auto and time.time() - t0 < 15:
-        return                     # 我们自己关的；或者后台重连也秒退，不再循环
-    if not _keep_alive():
-        return
-    # 短时间内反复崩：拉长间隔，避免「崩-连-崩」把机器拖垮
-    now = time.time()
-    hist = [t for t in _crashes.get(key, []) if now - t < 300]
-    hist.append(now)
-    _crashes[key] = hist
-    delay = 0.0 if len(hist) <= 2 else min(30.0, 5.0 * (len(hist) - 2))
-    _log('%s 客户端退出（5 分钟内第 %d 次），%s重连，窗口原本%s' % (
-        info['name'], len(hist), ('%.0fs 后' % delay) if delay else '',
-        '隐藏' if was_hidden else '可见'))
-    if delay:
-        time.sleep(delay)
-    time.sleep(2.0)                # 等系统把会话状态刷成 Disc
-    sess = _sessions().get(info['name'].lower())
-    if not sess or sess['state'] != 'disc':
-        return                     # 会话没了（被注销）或仍在线，不需要保活
-    ok, err = _connect(info, hidden=was_hidden, auto=True, reveal=not was_hidden)
-    _log('保活 %s: %s' % (info['name'], '已重连（窗口%s）' % ('隐藏' if was_hidden else '可见')
-                          if ok else '失败: %s' % err))
-
-
-_crashes = {}          # key -> [退出时间...]，用来算重连退避
+    _log('%s 客户端退出，记录已清（会话还在，可再点登录）' % info['name'])
 
 
 def login_user(name):
@@ -1601,8 +1663,7 @@ button:disabled{opacity:.5;cursor:default}
 <div id="banner"></div>
 <div id="msg"></div>
 <div class="hint" id="shotHint" style="margin:0 0 12px 2px"></div>
-<div id="grid" class="grid">
-<div class="ucard newcard" id="newCard">
+<div id="grid" class="grid"><div class="ucard newcard" id="newCard">
 <button class="newshot" id="btnNew" onclick="register()" title="点击创建新账号，账号和密码自动生成">
 <span class="plus">+</span><span class="newlbl" id="newLbl">新建账号</span>
 </button>
@@ -1913,6 +1974,8 @@ updateCard(c,u);
 grid.appendChild(c.el);
 }
 for(const n of Object.keys(cards)){if(!seen[n]){cards[n].el.remove();delete cards[n]}}
+const nc=document.getElementById('newCard');
+if(nc)grid.appendChild(nc);
 }
 
 async function loadThumb(c){
