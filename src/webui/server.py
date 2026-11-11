@@ -1977,6 +1977,7 @@ focusFail:'切换窗口失败：',
  buildLbl:'构建',
  devBuild:'开发版',
  updFound:'发现新版本 v{v}（当前 v{c}）',
+ updInsecure:'当前网络经代理中转，已跳过 HTTPS 证书校验（下载仍以 SHA256 校验为准）',
  updChecking:'正在检查更新…',
  updUptodate:'已是最新版本 v{v}',
  updDown:'正在下载 v{v} · {p}%',
@@ -2061,6 +2062,7 @@ focusFail:'Failed to switch window: ',
  buildLbl:'build',
  devBuild:'dev build',
  updFound:'Update available: v{v} (you have v{c})',
+ updInsecure:'Traffic goes through a TLS-intercepting proxy - certificate check skipped (downloads are still SHA256-verified)',
  updChecking:'Checking for updates…',
  updUptodate:'You are on the latest version v{v}',
  updDown:'Downloading v{v} · {p}%',
@@ -2168,9 +2170,10 @@ show=false;
 if(!show){box.classList.remove('on');return}
 box.classList.add('on');
 txt.textContent=main;
+let subTxt=s.insecure?(t('updInsecure')+' · '):'';
 if(s.page&&s.page.indexOf('https://github.com/')===0){
-sub.innerHTML=' '+(s.published?s.published+' · ':'')+'<a class="upda" href="'+s.page+'" target="_blank" rel="noopener">'+t('updNotes')+'</a>';
-}else{sub.textContent=s.published?(' '+s.published):''}
+sub.innerHTML=subTxt+(s.published?s.published+' · ':'')+'<a class="upda" href="'+s.page+'" target="_blank" rel="noopener">'+t('updNotes')+'</a>';
+}else{sub.textContent=subTxt+(s.published?(' '+s.published):'')}
 go.textContent=btn||t('updGo');
 go.style.display=btn?'':'none';
 go.disabled=btnOff;

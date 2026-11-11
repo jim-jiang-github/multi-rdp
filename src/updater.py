@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
@@ -65,6 +66,7 @@ _state = {
     'asset_id': 0,
     'sums_id': 0,
     'download_url': '',
+    'insecure': False,             # 证书验证失败降级过（TLS 中间人代理）
 }
 
 
@@ -186,11 +188,33 @@ def _update_dir():
 
 # ---------------------------------------------------------------- 网络
 
+# 部分代理环境（TLS 中间人）会把 api.github.com 的证书换成代理自己签的，OpenSSL
+# 构建不出完整链路 → CERTIFICATE_VERIFY_FAILED。先正常验证；确实是证书验证失败
+# 才降级为不校验证书重试一次，并把 insecure 标记出去（下载完整性由 SHA256 兜底，
+# 校验和与 exe 出自同一次发布，代理换不掉 CI 生成的摘要）。
+_ssl_ctx = None                     # None = 默认严格校验；降级后缓存未验证 context
+
+
+def _open(req, timeout):
+    """urlopen + 证书验证失败时的一次性降级重试。"""
+    global _ssl_ctx
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx)
+    except urllib.error.URLError as e:
+        if not isinstance(getattr(e, 'reason', None), ssl.SSLCertVerificationError):
+            raise
+        if _ssl_ctx is not None:    # 已经降级过还失败，那就是网络真不通
+            raise
+        _ssl_ctx = ssl._create_unverified_context()
+        _set(insecure=True)
+        return urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx)
+
+
 def _get(path, accept, timeout=TIMEOUT):
     req = urllib.request.Request(API + path)
     req.add_header('User-Agent', UA)
     req.add_header('Accept', accept)
-    return urllib.request.urlopen(req, timeout=timeout)
+    return _open(req, timeout)
 
 
 def check():
@@ -361,7 +385,7 @@ def _stream(path, accept, dest, absolute=False):
     req.add_header('User-Agent', UA)
     if accept:
         req.add_header('Accept', accept)
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    with _open(req, TIMEOUT) as r:
         total = int(r.headers.get('Content-Length') or 0)
         _set(total=total)
         got = 0
