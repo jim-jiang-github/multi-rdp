@@ -268,7 +268,9 @@ def render(name, hwnd, max_w=520, quality=68, ttl=3.0):
             return hit[1], hit[2], hit[0]
 
     if minimised or not visible:
-        # 藏起来的窗口 Windows 不再给它画，抓出来只会是黑的
+        # SW_HIDE / 最小化的窗口 Windows 不再作画，抓出来只会是黑的——
+        # 常规的「收进后台」是把窗口挪到屏幕外（仍可见），走上面的正常抓图路径，
+        # 画面能持续刷新；只有这里才回退到最后一帧
         return _fallback(low, 'hidden')
 
     with _gate:

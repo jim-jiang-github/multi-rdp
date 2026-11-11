@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """简易用户管理 Web UI：注册 / 登录(RDP) / 删除。仅监听 127.0.0.1。"""
-import atexit, ctypes, json, os, random, re, shutil, string, subprocess, sys, threading, time, urllib.parse, webbrowser, zlib
+import atexit, ctypes, ctypes.wintypes as wt, json, os, random, re, shutil, string, subprocess, sys, threading, time, urllib.parse, webbrowser, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -473,12 +473,18 @@ def _client_exe():
 #   · 客户端进程退出（点了窗口的 X）→ 连接断掉 → 会话立刻变 Disc
 #   · Disc 状态没有输入通道，DWM 也不再给这个会话出画面：里面的窗口虽然还记着
 #     自己的前台窗口，但拿不到真正的焦点，截图/键鼠注入都会失真
-# 所以「窗口关掉了、后台还得是激活的」只有一个做法：进程别退出，只把窗口藏起来
-# （ShowWindow(SW_HIDE)，任务栏和 Alt+Tab 里都看不到）。连接还在 → 会话始终 Active。
+# 所以「窗口关掉了、后台还得是激活的」只有一个做法：进程别退出，只把窗口藏起来。
+# 注意不能 ShowWindow(SW_HIDE)：真正藏起来的窗口 Windows 就不再给它作画了，
+# PrintWindow 抓出来全是黑的，卡片画面就冻结在藏起来那一瞬。所以改成：
+# 挪到虚拟屏幕外（IsWindowVisible 仍为 True，一切照常渲染）+ WS_EX_TOOLWINDOW
+# 把任务栏按钮和 Alt+Tab 条目摘掉——效果和 SW_HIDE 一样看不见，但画面是活的。
 _clients = {}   # username.lower() -> {'proc','hwnd','hidden','intent','auto','t0'}
 
 SW_HIDE, SW_SHOW, SW_RESTORE, SW_MINIMIZE = 0, 1, 9, 6
-SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+SW_SHOWNA = 8
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_NOACTIVATE, SWP_FRAMECHANGED = \
+    0x0001, 0x0002, 0x0004, 0x0010, 0x0020
+WS_EX_TOOLWINDOW, GWL_EXSTYLE = 0x80, -20
 HWND_TOPMOST, HWND_NOTOPMOST = ctypes.c_void_p(-1), ctypes.c_void_p(-2)
 GW_OWNER = 4
 _CLIENT_EXES = ('mstsc.exe',)
@@ -500,6 +506,13 @@ _user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
 _user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
 _user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
                                  ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+_user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.RECT)]
+_user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+_user32.GetSystemMetrics.restype = ctypes.c_int
+_user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_user32.GetWindowLongW.restype = ctypes.c_long
+_user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+_user32.SetWindowLongW.restype = ctypes.c_long
 _user32.BringWindowToTop.argtypes = [ctypes.c_void_p]
 _kernel32.OpenProcess.restype = ctypes.c_void_p
 _kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
@@ -765,7 +778,8 @@ def _adopt_by_title():
                 continue
             if ent is None:
                 ent = {'proc': None, 'pid': pid, 'hwnd': hwnd,
-                       'hidden': not bool(_user32.IsWindowVisible(hwnd)),
+                       'hidden': (not bool(_user32.IsWindowVisible(hwnd)))
+                                 or _win_offscreen(hwnd),
                        'intent': '', 'auto': False, 't0': 0}
                 _clients[key] = ent
                 _log('adopt %s: 按标题接管 hwnd %s（pid %s）' % (key, hwnd, pid))
@@ -990,14 +1004,70 @@ def _activate_window(hwnd):
         return False
 
 
+def _virtual_screen():
+    """虚拟屏幕 (x, y, w, h)：所有显示器的外接矩形。"""
+    return (_user32.GetSystemMetrics(76), _user32.GetSystemMetrics(77),
+            _user32.GetSystemMetrics(78), _user32.GetSystemMetrics(79))
+
+
+def _win_offscreen(hwnd):
+    """窗口是不是整个都落在虚拟屏幕外——这是我们把窗口「藏起来」的方式。"""
+    r = wt.RECT()
+    if not _user32.GetWindowRect(hwnd, ctypes.byref(r)):
+        return False
+    vx, vy, vcx, vcy = _virtual_screen()
+    return r.left >= vx + vcx or r.top >= vy + vcy or r.right <= vx or r.bottom <= vy
+
+
+_hidden_stash = {}      # hwnd -> (l, t, r, b)，藏起来之前的原始位置
+
+
 def _set_visible(hwnd, visible, activate=True):
-    """显示 / 隐藏窗口。显示时默认同时拉到前台激活；隐藏失败就退回最小化
-    （最小化同样保持连接、会话仍 Active）。"""
+    """显示 / 隐藏窗口。
+
+    「隐藏」= 挪到虚拟屏幕外 + WS_EX_TOOLWINDOW（任务栏/Alt+Tab 里照样看不到），
+    但 IsWindowVisible 保持 True，Windows 照常给它作画——PrintWindow 就能一直
+    抓到新画面，卡片上的预览不会冻结在藏起来那一瞬。显示时按 stash 放回原位再激活。
+    挪不动（布局怪异等）才退回老办法 SW_HIDE / 最小化。
+    """
     if visible:
+        ex = _user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        _user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_TOOLWINDOW)
+        r = _hidden_stash.pop(hwnd, None)
+        if r:
+            _user32.SetWindowPos(hwnd, 0, r[0], r[1], r[2] - r[0], r[3] - r[1],
+                                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        else:
+            # 管理程序重启过、stash 丢了（窗口还在屏幕外）：放回虚拟屏幕中央
+            r2 = wt.RECT()
+            if _win_offscreen(hwnd) and _user32.GetWindowRect(hwnd, ctypes.byref(r2)):
+                vx, vy, vcx, vcy = _virtual_screen()
+                w, h = r2.right - r2.left, r2.bottom - r2.top
+                _user32.SetWindowPos(hwnd, 0, vx + max(0, (vcx - w) // 2),
+                                     vy + max(0, (vcy - h) // 2), 0, 0,
+                                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                                     | SWP_FRAMECHANGED)
         if activate:
             return _activate_window(hwnd)
         _user32.ShowWindow(hwnd, SW_RESTORE if _user32.IsIconic(hwnd) else SW_SHOW)
         return True
+    # —— 藏起来 ——
+    r = wt.RECT()
+    if not _user32.GetWindowRect(hwnd, ctypes.byref(r)) or _win_offscreen(hwnd):
+        return True
+    _hidden_stash[hwnd] = (r.left, r.top, r.right, r.bottom)
+    ex = _user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    _user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW)
+    vx, vy, vcx, vcy = _virtual_screen()
+    ok = bool(_user32.SetWindowPos(hwnd, 0, vx + vcx + 80, vy + vcy + 80, 0, 0,
+                                   SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                                   | SWP_FRAMECHANGED))
+    # 一隐一现刷掉任务栏按钮（窗口在屏幕外，看不见这次闪烁）
+    _user32.ShowWindow(hwnd, SW_HIDE)
+    _user32.ShowWindow(hwnd, SW_SHOWNA)
+    if ok and _win_offscreen(hwnd) and _user32.IsWindowVisible(hwnd):
+        return True
+    # 兜底：老办法（Windows 不再作画，画面会冻结，但至少看不见）
     _user32.ShowWindow(hwnd, SW_HIDE)
     if _user32.IsWindowVisible(hwnd):
         _user32.ShowWindow(hwnd, SW_MINIMIZE)
@@ -1677,8 +1747,8 @@ def list_users():
         if len(free) == 1 and len(waiting) == 1:
             h, p, vis = free[0]
             _clients[waiting[0].lower()] = {'proc': None, 'pid': p, 'hwnd': h,
-                                            'hidden': not vis, 'intent': '',
-                                            'auto': False, 't0': 0}
+                                            'hidden': (not vis) or _win_offscreen(h),
+                                            'intent': '', 'auto': False, 't0': 0}
             _save_clients()
             _log('认领 %s: pid %s hwnd %s 可见=%s' % (waiting[0], p, h, vis))
         elif free:
@@ -1695,7 +1765,8 @@ def list_users():
             hwnd = ent.get('hwnd') or _client_window(v['name'], v['name'].lower())[0]
             if hwnd:
                 ent['hwnd'] = hwnd
-                ent['hidden'] = not bool(_user32.IsWindowVisible(hwnd))
+                # 屏幕外 = 我们藏的；不可见 = SW_HIDE/最小化兜底或用户自己藏的
+                ent['hidden'] = _win_offscreen(hwnd) or not bool(_user32.IsWindowVisible(hwnd))
             win = 'hidden' if ent.get('hidden') else 'visible'
         else:
             win = 'visible' if (st and st['state'] == 'active') else 'none'
