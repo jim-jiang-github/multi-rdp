@@ -148,6 +148,20 @@ SDL 默认走 GPU 加速渲染，而客户端和远程会话共用同一块 GPU�
   窗口可见就重连后显示并激活，隐藏着就继续隐藏；5 分钟内反复崩会自动拉长重连间隔
 - 相关动作都写进 `client.log`，带「客户端退出 / 保活重连」字样
 
+还有一种断线跟负载无关，症状很固定：`client.log` 里先出现
+`Fastpath update Bitmap [1] failed, status 0`，接着 `sdl_client_thread_run: Failed to check
+FreeRDP event handles`、进程退出、3 秒后重连。这是 **FreeRDP 3.32.0 的已知缺陷**——新版
+Windows（build 26xxx/28xxx）会发出它按要求无法解析的位图更新
+（上游 [issue #10067](https://github.com/FreeRDP/FreeRDP/issues/10067)、
+[#13883](https://github.com/FreeRDP/FreeRDP/issues/13883)，修复在 3.32 之后的版本里）。
+绕开的办法是别走 fastpath 位图，让客户端改用图形管线：
+
+```json
+{ "client_args": "/gfx:AVC444" }
+```
+
+这是本项目唯一验证有效的规避手段：换客户端版本要重新编译/替换 exe，代价更大。
+
 想从根上减少，可在 `config.json` 里给客户端加参数（不用重新打包），按需组合：
 
 ```json

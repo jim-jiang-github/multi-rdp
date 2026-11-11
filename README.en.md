@@ -171,6 +171,20 @@ What the manager does about it:
   minutes back off automatically
 - every action is logged to `client.log` ("client exited / keep-alive")
 
+One more failure mode is unrelated to load and has a very stable signature: `client.log` shows
+`Fastpath update Bitmap [1] failed, status 0`, then `sdl_client_thread_run: Failed to check
+FreeRDP event handles`, the process exits and reconnects three seconds later. That is a **known
+FreeRDP 3.32.0 defect** - newer Windows builds (26xxx/28xxx) send bitmap updates the client
+cannot parse (upstream [issue #10067](https://github.com/FreeRDP/FreeRDP/issues/10067),
+[#13883](https://github.com/FreeRDP/FreeRDP/issues/13883); fixed in releases after 3.32). The
+workaround is to leave the fastpath bitmap path alone and use the graphics pipeline instead:
+
+```json
+{ "client_args": "/gfx:AVC444" }
+```
+
+Replacing the client binary with a newer build works too, but costs far more (rebuild/re-vendor).
+
 To reduce the root cause, pass extra client arguments from `config.json` (no rebuild needed):
 
 ```json
