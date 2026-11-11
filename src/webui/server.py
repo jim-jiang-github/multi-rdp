@@ -5,8 +5,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
     from . import thumb                      # 作为包导入（托盘程序走这条）
+    import updater
 except ImportError:                          # python src/webui/server.py 直接跑
     import thumb
+    # src/ 不在 sys.path 里（直接跑本文件时 sys.path[0] 是 src/webui），补一下
+    _SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _SRC not in sys.path:
+        sys.path.insert(0, _SRC)
+    import updater
 
 PORT = 8123
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -148,6 +154,21 @@ def set_admin_default(on):
     cfg['admin_default'] = bool(on)
     _save_cfg(cfg)
     return cfg['admin_default']
+
+
+def auto_update():
+    """是否自动检查更新（config.json 的 auto_update，默认开）。
+
+    只影响「启动后自动去查」，界面上手动点「检查更新」永远可用。
+    """
+    return bool(_load_cfg().get('auto_update', True))
+
+
+def set_auto_update(on):
+    cfg = _load_cfg()
+    cfg['auto_update'] = bool(on)
+    _save_cfg(cfg)
+    return cfg['auto_update']
 
 # 远程桌面分辨率：auto = 跟随主显示器，fullscreen = 全屏，其余为 WxH 固定值
 _RES_RE = re.compile(r'^\d{2,5}x\d{2,5}$')
@@ -528,6 +549,28 @@ def _log(msg):
             f.write('[%s] %s\n' % (time.strftime('%Y-%m-%d %H:%M:%S'), msg))
     except OSError:
         pass
+
+
+# 升级时「谁来把进程停掉」由调用方决定：托盘程序要顺手把图标收走，
+# 直接跑 server.py 的场景只能硬退。
+_quit_hook = None
+
+
+def set_quit_hook(fn):
+    global _quit_hook
+    _quit_hook = fn
+
+
+def exit_for_update():
+    """新 exe 已经就位，退出让批处理把它换上去。"""
+    _log('更新：退出进程，交给替换脚本重启')
+    try:
+        if _quit_hook:
+            _quit_hook()
+            return
+    except Exception as e:
+        _log('更新：退出回调失败 %s' % e)
+    os._exit(0)
 
 
 # 老版本写在 exe 旁边的那批数据；换到 %LOCALAPPDATA% 之后第一次启动搬过去
@@ -1732,6 +1775,19 @@ button:disabled{opacity:.5;cursor:default}
 .newopt select{height:28px;font-size:12.5px;border:1px solid var(--line);border-radius:7px;padding:0 6px;background:#fff;color:var(--txt);flex:1;min-width:0;cursor:pointer}
 .newbtn{height:32px;font-size:13px;border-radius:8px;padding:0 12px}
 .langbtn{height:32px;padding:0 12px;font-size:13px;flex:0 0 auto}
+.upd{display:none;margin:0 0 14px;padding:12px 14px;border:1px solid #d9d3f4;background:#f4f2ff;border-radius:12px;color:#312c66}
+.upd.on{display:block}
+.updrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.upddot{width:8px;height:8px;border-radius:50%;background:var(--brand);flex:0 0 auto}
+.updtxt{font-size:13.5px;font-weight:600}
+.updsub{font-size:12.5px;color:#605a95}
+.updsp{flex:1 1 auto}
+.updbtn{height:30px;font-size:12.5px;padding:0 12px;flex:0 0 auto}
+.updbtn:disabled{opacity:.55;cursor:default}
+.updprog{display:none;height:4px;border-radius:2px;background:#e2ddf7;margin-top:10px;overflow:hidden}
+.updprog.on{display:block}
+.updprog i{display:block;height:100%;width:0;background:var(--brand);transition:width .25s}
+.upda{color:var(--brand);text-decoration:none;font-size:12.5px;border-bottom:1px dotted currentColor}
 </style></head><body>
 <div class="wrap">
 <div class="top">
@@ -1739,6 +1795,10 @@ button:disabled{opacity:.5;cursor:default}
 <button class="ghost langbtn" id="btnLang" onclick="toggleLang()">English</button>
 </div>
 <div id="banner"></div>
+<div class="upd" id="upd">
+<div class="updrow"><span class="upddot"></span><span class="updtxt" id="updTxt"></span><span class="updsub" id="updSub"></span><span class="updsp"></span><button class="primary updbtn" id="updGo" onclick="updGo()">立即升级</button><button class="ghost updbtn" id="updLater" onclick="updLater()">稍后</button></div>
+<div class="updprog" id="updProg"><i id="updBar"></i></div>
+</div>
 <div id="msg"></div>
 <div class="hint" id="shotHint" style="margin:0 0 12px 2px"></div>
 <div id="grid" class="grid"><div class="ucard newcard" id="newCard">
@@ -1834,7 +1894,21 @@ focusFail:'切换窗口失败：',
  grpNative:'本机支持',
  grpCommon:'常用分辨率',
  langBtn:'English',
- buildLbl:'构建'
+ buildLbl:'构建',
+ devBuild:'开发版',
+ updFound:'发现新版本 v{v}（当前 v{c}）',
+ updChecking:'正在检查更新…',
+ updUptodate:'已是最新版本 v{v}',
+ updDown:'正在下载 v{v} · {p}%',
+ updReady:'v{v} 已下载完成，重启后生效',
+ updApplying:'正在重启以完成升级…',
+ updFail:'更新失败：',
+ updGo:'立即升级',
+ updReboot:'立即重启',
+ updLater:'稍后',
+ updRetry:'重试',
+ updNotes:'更新说明',
+ updCfg:'自动检查更新'
 },
 en:{
  title:'User Management',
@@ -1909,7 +1983,21 @@ focusFail:'Failed to switch window: ',
  grpNative:'Supported by this display',
  grpCommon:'Common resolutions',
  langBtn:'中文',
- buildLbl:'build'
+ buildLbl:'build',
+ devBuild:'dev build',
+ updFound:'Update available: v{v} (you have v{c})',
+ updChecking:'Checking for updates…',
+ updUptodate:'You are on the latest version v{v}',
+ updDown:'Downloading v{v} · {p}%',
+ updReady:'v{v} downloaded — restart to apply',
+ updApplying:'Restarting to finish the update…',
+ updFail:'Update failed: ',
+ updGo:'Update now',
+ updReboot:'Restart now',
+ updLater:'Later',
+ updRetry:'Retry',
+ updNotes:'Release notes',
+ updCfg:'Check for updates automatically'
 }
 };
 let LANG='zh';
@@ -1944,7 +2032,8 @@ try{return JSON.parse(txt)}catch(e){return {ok:false,error:t('badResp')+' (HTTP 
 function msg(t2,cls){const m=document.getElementById('msg');m.textContent=t2||'';m.className=cls||''}
 function applyStatus(s){
 const vb=document.getElementById('ver');
-if(vb)vb.textContent=(s&&s.build)?(t('buildLbl')+' '+s.build):'';
+if(vb){const bits=[];if(s&&s.version)bits.push('v'+s.version);else if(s&&s.dev_build)bits.push(t('devBuild'));
+if(s&&s.build)bits.push(t('buildLbl')+' '+s.build);vb.textContent=bits.join(' \u00b7 ')}
 const b=document.getElementById('banner');
 if(s&&s.admin===false){b.style.display='block';b.textContent=t('bannerNoAdmin')}else{b.style.display='none'}
 const fix=document.getElementById('btnFix');
@@ -1969,6 +2058,105 @@ try{
 await api('config',{admin_default:on});
 msg(on?t('saveCfgOkAdmin'):t('saveCfgOkNormal'),on?'ok':'');
 }catch(e){msg(t('saveCfgFail')+e,'err')}
+}
+
+/* ---------- 自动升级 ----------
+   服务端自己去 GitHub 查版本（tag → exe 版本资源），这里只负责显示和触发。
+   下载是服务端流式写盘，前端靠轮询 /api/update 拿百分比；进度快的时候 0.9 秒
+   一次，闲下来 20 秒一次，切到后台标签页也不停（升级中途换标签别丢进度）。*/
+let updState=null,updTimer=null,updManual=false,updSkip='';
+function updRender(s){
+if(!s)return;
+updState=s;
+const box=document.getElementById('upd');if(!box)return;
+const ph=s.phase||'idle';
+const txt=document.getElementById('updTxt'),sub=document.getElementById('updSub');
+const go=document.getElementById('updGo'),later=document.getElementById('updLater');
+const prog=document.getElementById('updProg'),bar=document.getElementById('updBar');
+let show=true,main='',btn='',btnOff=false,laterOn=true,progOn=false,pct=0;
+if(ph==='found'){
+if(updSkip&&updSkip===s.version)show=false;
+main=t('updFound',{v:s.version,c:s.current});
+btn=t('updGo');
+}else if(ph==='downloading'){
+main=t('updDown',{v:s.version,p:s.pct||0});btn=t('updGo');btnOff=true;laterOn=false;
+progOn=true;pct=s.pct||0;
+}else if(ph==='ready'){
+main=t('updReady',{v:s.version});btn=t('updReboot');
+}else if(ph==='applying'){
+main=t('updApplying');btnOff=true;laterOn=false;progOn=true;pct=100;
+}else if(ph==='checking'){
+show=updManual;main=t('updChecking');btnOff=true;laterOn=false;
+}else if(ph==='uptodate'){
+show=updManual;main=t('updUptodate',{v:s.current||'?'});btnOff=true;laterOn=false;
+}else if(ph==='error'){
+show=updManual||!!s.version;main=t('updFail')+(s.error||'');btn=t('updRetry');
+}else{
+show=false;
+}
+if(!show){box.classList.remove('on');return}
+box.classList.add('on');
+txt.textContent=main;
+if(s.page&&s.page.indexOf('https://github.com/')===0){
+sub.innerHTML=' '+(s.published?s.published+' · ':'')+'<a class="upda" href="'+s.page+'" target="_blank" rel="noopener">'+t('updNotes')+'</a>';
+}else{sub.textContent=s.published?(' '+s.published):''}
+go.textContent=btn||t('updGo');
+go.style.display=btn?'':'none';
+go.disabled=btnOff;
+later.style.display=laterOn?'':'none';
+prog.classList.toggle('on',progOn);
+if(progOn)bar.style.width=(pct>0?pct:3)+'%';
+}
+async function updPoll(){
+clearTimeout(updTimer);
+try{
+const r=await fetch('/api/update',{cache:'no-store'});
+updRender(await r.json());
+}catch(e){}
+const ph=updState&&updState.phase;
+const fast=(ph==='downloading'||ph==='applying'||ph==='checking');
+updTimer=setTimeout(updPoll,fast?900:(updManual?5000:20000));
+}
+async function updGo(){
+const s=updState||{};
+if(s.phase==='applying'||s.phase==='downloading')return;
+let action='check';
+if(s.phase==='ready')action='apply';
+else if(s.phase==='found'||s.phase==='error')action=s.version?'download':'check';
+updManual=true;
+if(action==='apply'){
+const cur=(updState&&updState.current)||'';
+const r=await api('update',{action});
+const st=(r&&r.state)||{};
+updRender(st);
+if(r&&r.ok){
+/* 进程马上会退出换 exe：连不上说明正在重启，等新实例报出一个不同的版本号再刷新，
+   不然可能在旧进程退出前的空档刷回旧页面 */
+let n=0;
+const again=setInterval(async()=>{
+n++;
+try{
+const rr=await fetch('/api/status',{cache:'no-store'});
+if(rr.ok){
+const s=await rr.json();
+if(s.version&&s.version!==cur){clearInterval(again);location.reload()}
+}
+}catch(e){}
+if(n>60)clearInterval(again);
+},1500);
+}
+return;
+}
+await api('update',{action});
+updPoll();
+}
+function updLater(){
+updSkip=(updState&&updState.version)||'';
+document.getElementById('upd').classList.remove('on');
+updManual=false;
+}
+async function updToggleAuto(on){
+try{await api('config',{auto_update:!!on})}catch(e){}
 }
 async function saveRes(){
 try{await api('config',{resolution:document.getElementById('resSel').value})}catch(e){}
@@ -2183,8 +2371,9 @@ applyStatus(s);
 await refresh();
 shotTick();
 setInterval(refresh,USERS_MS);
+updPoll();
 document.addEventListener('visibilitychange',function(){
-if(document.visibilityState==='visible'){refresh();shotTick()}
+if(document.visibilityState==='visible'){refresh();shotTick();updPoll()}
 else{clearTimeout(shotTimer)}
 });
 })();
@@ -2244,7 +2433,14 @@ class Handler(BaseHTTPRequestHandler):
                         'admin_default': admin_default(), 'lang': _lang(),
                         'resolution': resolution(),
                         'modes': modes, 'common': _common_resolutions(modes),
-                        'build': _build_stamp()})
+                        'build': _build_stamp(),
+                        'version': updater.fmt(updater.current_version()),
+                        'dev_build': updater.is_dev(),
+                        'auto_update': auto_update()})
+        elif self.path == '/api/update':
+            s = updater.snapshot()
+            s['auto'] = auto_update()
+            self._json(s)
         else:
             self.send_error(404)
 
@@ -2309,8 +2505,30 @@ class Handler(BaseHTTPRequestHandler):
                 set_lang(body.get('lang'))
             if 'resolution' in body:
                 set_resolution(body.get('resolution'))
+            if 'auto_update' in body:
+                set_auto_update(body.get('auto_update'))
             self._json({'ok': True, 'admin_default': admin_default(), 'lang': _lang(),
-                        'resolution': resolution()})
+                        'resolution': resolution(), 'auto_update': auto_update()})
+        elif p == '/api/update':
+            act = body.get('action')
+            if act == 'check':
+                updater.check_async()
+            elif act == 'download':
+                updater.download_async()
+            elif act == 'apply':
+                ok, err = updater.apply()
+                s = updater.snapshot()
+                s['auto'] = auto_update()
+                self._json({'ok': ok, 'error': err, 'state': s})
+                if ok:
+                    # 给响应一点时间发出去，再退出（批处理在等本进程结束）
+                    threading.Timer(1.0, exit_for_update).start()
+                return
+            elif act == 'auto':
+                set_auto_update(bool(body.get('on')))
+            s = updater.snapshot()
+            s['auto'] = auto_update()
+            self._json({'ok': True, 'state': s})
         elif p == '/api/login':
             ok, err = login_user(body.get('name', ''))
             self._json({'ok': ok, 'error': err})
@@ -2369,7 +2587,29 @@ def _try_elevate():
 
 def start_server(port=PORT):
     """创建 HTTP server 对象（不阻塞、不弹浏览器、不提权），供托盘程序后台运行。"""
-    return ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    srv = ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    # 上次升级留下的半截文件 / _update.bat / .old，顺手清掉
+    try:
+        updater.cleanup()
+    except Exception:
+        pass
+    threading.Thread(target=_update_watch, daemon=True).start()
+    return srv
+
+
+def _update_watch():
+    """启动后查一次更新，之后每小时问一次（updater 内部按 6 小时节流）。
+
+    放后台线程里，GitHub 慢或不通都不会拖住界面。
+    """
+    time.sleep(6)
+    while True:
+        try:
+            if auto_update():
+                updater.maybe_check()
+        except Exception as e:
+            _log('检查更新失败：%s' % e)
+        time.sleep(3600)
 
 def main():
     admin = _is_admin()

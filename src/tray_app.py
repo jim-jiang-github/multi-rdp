@@ -4,6 +4,7 @@
 后台运行用户管理 Web UI（server.py），在系统托盘提供图标菜单：
   - 打开 Web UI
   - 新用户默认授予管理员（勾选项，写入 config.json）
+  - 检查更新 / 自动检查更新（版本号来自 git tag，见 src/updater.py）
   - 打开数据目录（%LOCALAPPDATA%\\MultiRDP）
   - 退出
 
@@ -12,6 +13,7 @@
 import os
 import sys
 import threading
+import time
 import webbrowser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +23,7 @@ if not getattr(sys, 'frozen', False):
     sys.path.insert(0, HERE)
 
 from webui import server as server_mod   # noqa: E402
+import updater                           # noqa: E402  (src/updater.py)
 
 
 def _elevate_and_exit():
@@ -106,10 +109,73 @@ def _on_exit(icon, item):
     icon.stop()
 
 
+def _quit_for_update(icon):
+    """升级时退出：先把 HTTP 服务停掉，再把托盘图标收走。"""
+    try:
+        _srv.shutdown()
+    except Exception:
+        pass
+    icon.stop()
+
+
+def _version_label():
+    v = updater.fmt(updater.current_version())
+    return ('v' + v) if v else '开发版'
+
+
+def _notify(icon, title, text=''):
+    try:
+        icon.notify(text, title)
+    except Exception:
+        pass
+
+
+def _check_update(icon, item):
+    """手动检查：查完直接弹系统通知，不用切到网页。"""
+    def run():
+        s = updater.check()
+        ph = s['phase']
+        if ph == 'found':
+            _notify(icon, '发现新版本 v%s' % s['version'],
+                    '打开 Web UI 点「立即升级」即可更新')
+        elif ph == 'uptodate':
+            _notify(icon, '已是最新版本', 'v%s' % (s['current'] or '?'))
+        elif ph == 'error':
+            _notify(icon, '检查更新失败', (s['error'] or '')[:150])
+        elif ph == 'dev':
+            _notify(icon, '这是开发版', '只有带版本号的发布包才会检查更新')
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _auto_checked(item):
+    return server_mod.auto_update()
+
+
+def _toggle_auto(icon, item):
+    server_mod.set_auto_update(not server_mod.auto_update())
+
+
+def _watch_updates(icon):
+    """自动检查有新版本时弹一次通知（同一个版本只提醒一次）。"""
+    seen = ''
+    while True:
+        try:
+            s = updater.snapshot()
+            if s['phase'] == 'found' and s['version'] != seen:
+                seen = s['version']
+                _notify(icon, 'MultiRDP v%s 可用' % s['version'],
+                        '当前 v%s · 打开托盘菜单或 Web UI 升级' % (s['current'] or '?'))
+        except Exception:
+            pass
+        time.sleep(90)
+
+
 _srv = None
 
 
 def main():
+    # 升级后的第一次启动：等旧进程退干净（它还占着 8123），再删掉 *.old
+    updater.handled_startup()
     _elevate_and_exit()
     global _srv
     try:
@@ -135,15 +201,23 @@ def main():
 
     import pystray
     menu = pystray.Menu(
+        pystray.MenuItem('MultiRDP ' + _version_label(), None, enabled=False),
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem('打开 Web UI', _open_webui, default=True),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem('新用户默认授予管理员', _toggle_admin_default,
                          checked=_admin_default_checked),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem('检查更新', _check_update),
+        pystray.MenuItem('自动检查更新', _toggle_auto, checked=_auto_checked),
+        pystray.Menu.SEPARATOR,
         pystray.MenuItem('打开数据目录', _open_data_dir),
         pystray.MenuItem('退出', _on_exit),
     )
     icon = pystray.Icon('MultiRDP', _icon_image(), 'MultiRDP - 多用户 RDP 管理', menu)
+    # 升级完成后由 server 调用：停服务 + 收图标，进程退出，批处理接手替换
+    server_mod.set_quit_hook(lambda: _quit_for_update(icon))
+    threading.Thread(target=_watch_updates, args=(icon,), daemon=True).start()
     icon.run()
 
 

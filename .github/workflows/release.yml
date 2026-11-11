@@ -38,6 +38,13 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
+      - name: Validate tag format
+        # 版本号 = tag，运行期自动升级也按这个规则比大小。格式不对就别往下走，
+        # 免得发出去一个「版本号解析不出来」的包（那样客户端永远升不上去）。
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: python scripts/make_version.py --check-tag $env:GITHUB_REF_NAME
+
       - name: Work out the version
         id: ver
         shell: pwsh
@@ -132,6 +139,8 @@ jobs:
           3. 网页里新建账号，卡片会显示各会话的实时缩略图；点卡片把窗口切到前台
 
           `users.json` / `config.json` / `aliases.json` 等运行数据放在 `%LOCALAPPDATA%\MultiRDP`：exe 可以随便挪、覆盖升级，账号不会跟着丢。托盘菜单里有「打开数据目录」。
+
+          程序自带自动升级：发布新版本后，已安装的旧版会在界面提示，点「立即升级」即可完成下载、SHA256 校验与替换重启，无需手动下载。
 
           **环境**：Windows 10/11 x64。不需要装 FreeRDP 或 .NET，系统自带 mstsc 即可。
 

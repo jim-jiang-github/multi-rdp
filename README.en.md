@@ -59,7 +59,10 @@ colleagues their own desktop, and so on.
 - **White-screen repair** — detects whether OpenStreamMS hijacked the RDP graphics pipeline
   (`RDP-Tcp\LoadableProtocol_Object`) and restores the Microsoft protocol with one click
 - **Tray resident** — `MultiRDP.exe` runs in the tray with a menu: Open Web UI / default-admin
-  toggle / Exit
+  toggle / Check for updates / Exit
+- **Auto-update** — polls GitHub for a new release, shows a banner in the web UI, then downloads,
+  verifies SHA256 and swaps itself in place on one click (version numbers map 1:1 to tags, see
+  "Auto-update" below)
 - **Bilingual UI (English / Chinese)** — one-click switch at the top right; the choice is stored
   in `config.json` (`lang`) and API error messages follow the same language
 
@@ -122,13 +125,39 @@ git push origin v1.2.0
 | Event | Result |
 | --- | --- |
 | Tag `v1.2.0` pushed | Builds and publishes a Release; body lists commits since the previous tag |
-| Tag `v1.2.0-beta1` pushed | Same, flagged as a prerelease |
+| Tag `v1.2.0-rc.1` pushed | Same, flagged as a prerelease (installed clients won't auto-update to it) |
+| Malformed tag (`v1.2`) pushed | Build fails — no release with an unparsable version ever ships |
 | Actions → Release → Run workflow | Build only, artifact kept, no Release (smoke test) |
+
+**The tag format is strict** because the version number comes entirely from the tag. The rule is
+defined once (`TAG_RE` in `src/updater.py`) and shared by the build (`make_version.py`) and the
+runtime auto-updater:
+
+```
+v<major>.<minor>.<patch>[-alpha.N | -beta.N | -rc.N]     e.g. v0.2.0, v1.3.0-rc.1
+```
+
+Tags without the `v` prefix, with a missing segment (`v1.2`) or an extra one (`v1.2.3.4`) are
+rejected; CI runs `make_version.py --check-tag` first and fails loudly.
 
 Assets: `MultiRDP.exe` (single file), `MultiRDP-vX.Y.Z-win64.zip` (exe + docs) and
 `SHA256SUMS.txt`. The exe version comes from the tag (right-click → Properties → Details);
 PyInstaller is pinned via `PYINSTALLER_VERSION` in the workflow to match `build.bat`.
 CI builds are unsigned, so SmartScreen warns "unknown publisher" on first run.
+
+## Auto-update
+
+Installed exes check GitHub for a newer release (on by default; toggle in the tray menu, or click
+the banner in the web UI):
+
+- comparison = the exe's own version resource vs the latest release tag, both `vX.Y.Z`
+- checks go through the GitHub API; downloads use the API asset endpoint, which survives proxies
+  better than the `releases/download` URL
+- every download is verified against `SHA256SUMS.txt`; on mismatch it is deleted, not installed
+- replacement happens in place: the running exe is renamed to `.old` (Windows allows renaming a
+  running exe), the new one is written to the original path, and the new process is started with
+  `--after-update <pid>` so it waits for the old one to exit, then cleans up `.old`
+- no version resource (local `build.bat` output, or plain `python`) = dev build, auto-update off
 
 ## Project layout
 
@@ -136,6 +165,7 @@ CI builds are unsigned, so SmartScreen warns "unknown publisher" on first run.
 multi-rdp/
 ├── src/
 │   ├── tray_app.py          # tray app entry point (pystray)
+│   ├── updater.py           # auto-update: check Release -> download -> SHA256 -> in-place swap
 │   └── webui/
 │       ├── server.py        # web UI + user management core (127.0.0.1:8123)
 │       ├── screencap.py     # pure-ctypes GDI screenshot helper

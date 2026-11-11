@@ -48,7 +48,9 @@
 - **孤儿目录扫描**：本工具生成的随机用户名目录若残留，会重新列在界面上供清理
 - **修复登录白屏**：检测 OpenStreamMS 是否劫持了 RDP 图形管线
   （`RDP-Tcp\LoadableProtocol_Object`），一键还原为微软原版协议
-- **托盘常驻**：`MultiRDP.exe` 后台运行，托盘菜单提供「打开 Web UI / 新用户默认授予管理员 / 退出」
+- **托盘常驻**：`MultiRDP.exe` 后台运行，托盘菜单提供「打开 Web UI / 新用户默认授予管理员 / 检查更新 / 退出」
+- **自动升级**：后台查 GitHub 最新 Release，发现新版本就在网页横幅提示，点一下就下载、
+  校验 SHA256 并替换重启；版本号与 tag 一一对应（详见下文「自动升级」）
 - **中英双语界面**：右上角一键切换，选择保存在 `config.json`（`lang`），接口返回的错误提示同步切换
 
 ## 快速开始
@@ -113,13 +115,36 @@ git push origin v1.2.0
 | 事件 | 结果 |
 | --- | --- |
 | 推送 tag `v1.2.0` | 构建并发布 Release，正文自动列出上一个 tag 以来的提交 |
-| 推送 tag `v1.2.0-beta1` | 同上，但标记为 prerelease |
+| 推送 tag `v1.2.0-rc.1` | 同上，但标记为 prerelease（正式版发布后客户端不会提示升级到它） |
+| 推送格式不对的 tag（如 `v1.2`） | 构建直接失败，不会产出版本号解析不出来的发布包 |
 | Actions → Release → Run workflow | 只构建、留 artifact，不发 Release（验证构建用） |
+
+**tag 格式有要求**：版本号完全来自 tag，规则在 `src/updater.py` 的 `TAG_RE` 一处定义，
+`make_version.py`（构建期）和自动升级（运行期）都用它判断：
+
+```
+v<主>.<次>.<修>[-alpha.N | -beta.N | -rc.N]     例如 v0.2.0、v1.0.0、v1.3.0-rc.1
+```
+
+不带 `v` 前缀（`1.2.3`）、少一段（`v1.2`）、多一段（`v1.2.3.4`）都会被拒。CI 会先跑
+`make_version.py --check-tag` 校验，不合法时直接标红退出。
 
 Release 里附三样东西：`MultiRDP.exe`（单文件）、`MultiRDP-vX.Y.Z-win64.zip`
 （exe + 说明文档）、`SHA256SUMS.txt`。exe 的版本号取自 tag，右键 → 属性 → 详细信息
 能看到；PyInstaller 版本在 workflow 的 `PYINSTALLER_VERSION` 里锁死，与本地
 `build.bat` 一致。CI 产物没有代码签名，首次运行 SmartScreen 会提示「未知发布者」。
+
+## 自动升级
+
+装好的 exe 会自己检查新版本（默认开，托盘菜单可关，也可以在网页横幅里点「检查更新」）：
+
+- 版本对比用的是 exe 里的版本资源 vs 最新 Release 的 tag，两边都是 `vX.Y.Z`，不会比错
+- 检查走 GitHub API；下载走 API 的 asset 接口，比 `releases/download` 那个地址更容易穿过代理
+- 下载完先对 `SHA256SUMS.txt` 校验，对不上就删掉不装
+- 替换是就地完成的：运行中的 exe 先改名成 `.old`（Windows 允许），新 exe 写到原路径，
+  新进程带上 `--after-update` 参数等旧进程退出再启动，启动时自己把 `.old` 清掉
+- 已断开的会话不受影响：升级重启后数据还在 `%LOCALAPPDATA%\MultiRDP`，卡片照样有最后一帧
+- 没有版本号的构建（本地 `build.bat` 打的、直接跑源码的）视为开发版，不参与自动升级
 
 ## 项目结构
 
@@ -127,6 +152,7 @@ Release 里附三样东西：`MultiRDP.exe`（单文件）、`MultiRDP-vX.Y.Z-wi
 multi-rdp/
 ├── src/
 │   ├── tray_app.py          # 托盘程序入口（pystray）
+│   ├── updater.py           # 自动升级：查 Release → 下载 → SHA256 → 就地替换
 │   └── webui/
 │       ├── server.py        # Web UI + 用户管理核心（127.0.0.1:8123）
 │       ├── screencap.py     # 纯 ctypes GDI 截屏小工具
