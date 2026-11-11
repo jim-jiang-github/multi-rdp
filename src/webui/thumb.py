@@ -13,6 +13,8 @@
 import ctypes
 import ctypes.wintypes as wt
 import io
+import os
+import re
 import threading
 import time
 
@@ -67,6 +69,74 @@ _lock = threading.Lock()
 _cache = {}                 # key -> (ts, jpeg_bytes, state)
 _cache_lock = threading.Lock()
 _gate = threading.Semaphore(2)      # 同时最多两个 GDI 抓屏，避免一屏 30 张卡把 CPU 打满
+
+# 最后一帧：会话断了 / 窗口被藏了 / 程序重启过，卡片上都还留着断开前那张画面。
+# 内存一份（快），磁盘一份（重启后还在，放在 exe 旁边的 thumbs/）。
+_last = {}                  # name -> (ts, jpeg_bytes)
+_disk_dir = ''              # 由 server 启动时调 set_cache_dir() 设置
+_disk_wrote = {}            # name -> ts，写盘节流用
+
+
+def set_cache_dir(path):
+    """最后一帧落盘的位置。建不出来就只留内存，不影响抓图。"""
+    global _disk_dir
+    try:
+        os.makedirs(path, exist_ok=True)
+        _disk_dir = path
+    except Exception:
+        _disk_dir = ''
+
+
+def _safe(name):
+    return re.sub(r'[^0-9A-Za-z_.-]', '_', name)[:60] or 'user'
+
+
+def _disk_path(name):
+    return os.path.join(_disk_dir, _safe(name) + '.jpg') if _disk_dir else ''
+
+
+def _remember(name, jpeg, now):
+    """留一帧当「最后画面」。"""
+    _last[name] = (now, jpeg)
+    p = _disk_path(name)
+    if not p or now - _disk_wrote.get(name, 0) < 20:
+        return
+    _disk_wrote[name] = now
+    try:
+        tmp = p + '.tmp'
+        with open(tmp, 'wb') as f:
+            f.write(jpeg)
+        os.replace(tmp, p)          # 原子替换，别让并发的读拿到半张图
+    except Exception:
+        pass
+
+
+def _recall(name):
+    """取「最后画面」：先内存，再磁盘（程序重启后靠它）。"""
+    hit = _last.get(name)
+    if hit:
+        return hit
+    p = _disk_path(name)
+    if not p:
+        return None
+    try:
+        if os.path.getsize(p) < 512:
+            return None
+        with open(p, 'rb') as f:
+            data = f.read()
+        hit = (os.path.getmtime(p), data)
+        _last[name] = hit
+        return hit
+    except Exception:
+        return None
+
+
+def _fallback(name, state):
+    """抓不到画面时退回最后一帧。"""
+    hit = _recall(name)
+    if hit:
+        return hit[1], state, hit[0]
+    return None, 'none', 0.0
 
 
 def _grab(hwnd):
@@ -176,35 +246,36 @@ def _looks_blank(img):
 
 
 def render(name, hwnd, max_w=520, quality=68, ttl=3.0):
-    """返回 (jpeg_bytes, state)。
+    """返回 (jpeg_bytes, state, 时间戳)。
 
-    state: 'ok' 有画面 / 'hidden' 窗口被藏起来了 / 'none' 抓不到
+    state: 'ok'     刚抓的这一帧
+           'hidden' 窗口被藏起来 / 最小化了（画面是藏起来之前的最后一帧）
+           'stale'  会话断了，画面是断开前的最后一帧
+           'none'   从来没有过画面
     """
+    low = name.lower()
+    now = time.time()
+
     if not hwnd or not _user32.IsWindow(hwnd):
-        return None, 'none'
+        return _fallback(low, 'stale')
     visible = bool(_user32.IsWindowVisible(hwnd))
     minimised = bool(_user32.IsIconic(hwnd))
 
-    key = (name.lower(), int(hwnd))
-    now = time.time()
+    key = (low, int(hwnd))
     with _cache_lock:
         hit = _cache.get(key)
         if hit and now - hit[0] < ttl:
-            return hit[1], hit[2]
+            return hit[1], hit[2], hit[0]
 
-    if minimised:
-        return None, 'hidden'
-    if not visible:
+    if minimised or not visible:
         # 藏起来的窗口 Windows 不再给它画，抓出来只会是黑的
-        return None, 'hidden'
+        return _fallback(low, 'hidden')
 
     with _gate:
         with _lock:
             img = _grab(hwnd)
-    if img is None:
-        return None, 'none'
-    if _looks_blank(img):
-        return None, 'none'
+    if img is None or _looks_blank(img):
+        return _fallback(low, 'stale')
 
     img = _trim_letterbox(img)
 
@@ -219,12 +290,21 @@ def render(name, hwnd, max_w=520, quality=68, ttl=3.0):
         if len(_cache) > 64:                 # 别让缓存无限长
             for k in list(_cache)[:-48]:
                 _cache.pop(k, None)
-    return data, 'ok'
+    _remember(low, data, now)
+    return data, 'ok', now
 
 
 def drop(name):
-    """用户被删/窗口换了：把它的缓存清掉。"""
+    """用户被删/窗口换了：把它的缓存和最后画面一起清掉。"""
     low = name.lower()
     with _cache_lock:
         for k in [k for k in _cache if k[0] == low]:
             _cache.pop(k, None)
+    _last.pop(low, None)
+    _disk_wrote.pop(low, None)
+    p = _disk_path(low)
+    if p:
+        try:
+            os.remove(p)
+        except Exception:
+            pass

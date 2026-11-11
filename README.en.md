@@ -50,8 +50,10 @@ colleagues their own desktop, and so on.
 - **Card panel with live-ish previews** — one card per account, the top half is a thumbnail of that
   remote desktop. No video streaming: while the page is in the foreground it grabs one frame every
   6 seconds (`PrintWindow`, so an occluded window still captures), and it stops entirely when the
-  tab goes to the background. Click a thumbnail to bring that remote window to the front; a hidden
-  window shows "Window hidden · click to open"
+  tab goes to the background. The frame is scaled down as a whole and letterboxed instead of being
+  cropped or stretched. Click a thumbnail to bring that remote window to the front; a hidden window
+  keeps the last frame, and a disconnected session keeps showing the frame from just before it
+  dropped (cached in `thumbs/` next to the exe, so it survives a restart)
 - **Orphan folder scan** — leftover profile folders created by this tool are re-listed so they
   can be cleaned up
 - **White-screen repair** — detects whether OpenStreamMS hijacked the RDP graphics pipeline
@@ -178,10 +180,12 @@ confirm it manually once - it stays silent afterwards too.
 
 ### When the client exits / the window disappears
 
-- when the client process exits (crashes on its own or the window is closed with X), the
-  reconnect **preserves visibility**: a visible window comes back visible and activated, a hidden
-  one stays hidden; repeated crashes within five minutes back off automatically
-- every action is logged to `client.log` ("mstsc launch / client exited / keep-alive")
+- when the client process exits (window closed with X, or the process dies) only the bookkeeping is
+  dropped - there is **no automatic reconnect** (an earlier keep-alive resurrected closed windows
+  and was removed on request)
+- the session itself may still be alive: click "Login" on the card to reopen the window, or "Reset"
+  to end it for good
+- every action is logged to `client.log` ("mstsc launch / client exited")
 
 ### Why not FreeRDP (history)
 

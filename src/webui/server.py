@@ -18,6 +18,8 @@ else:
     BASE_DIR = HERE
 USERS_FILE = os.path.join(BASE_DIR, 'users.json')
 CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
+# 卡片上的「最后画面」落盘在 exe 旁边，程序重启后卡片照样有图
+thumb.set_cache_dir(os.path.join(BASE_DIR, 'thumbs'))
 RDP_GROUP = 'Remote Desktop Users'
 ADMIN_GROUP = 'Administrators'
 RESERVED = {'administrator', 'guest', 'defaultaccount', 'wdagutilityaccount',
@@ -1616,15 +1618,16 @@ button:disabled{opacity:.5;cursor:default}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(292px,1fr));gap:16px}
 .ucard{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(20,20,50,.05);display:flex;flex-direction:column;transition:box-shadow .18s,border-color .18s}
 .ucard:hover{box-shadow:0 6px 18px rgba(20,20,50,.10);border-color:#d8dbe9}
-.shot{position:relative;aspect-ratio:var(--shot-ar,16/10);background:#0e1522;cursor:pointer;overflow:hidden}
-.shot img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .3s}
+/* 缩略图：整幅画面按比例缩进卡片，比例对不上就留黑边（contain），绝不裁剪/拉伸 */
+.shot{position:relative;aspect-ratio:16/10;background:#0a0f19;cursor:pointer;overflow:hidden}
+.shot img{width:100%;height:100%;object-fit:contain;display:block;opacity:0;transition:opacity .3s}
 .shot img.ready{opacity:1}
 .shot .ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#6b7590;font-size:12.5px;text-align:center;padding:0 18px;line-height:1.5}
 .shot .ph svg{opacity:.5}
 .shot .veil{position:absolute;inset:0;background:rgba(10,16,26,.58);display:none;align-items:center;justify-content:center;color:#dfe6f4;font-size:12.5px;text-align:center;padding:0 20px;line-height:1.5}
-.shot.is-dim .veil{display:flex}
-.shot.is-dim .ph{display:none}
-.shot.is-dim img{filter:grayscale(.45) brightness(.72)}
+.shot.veil-on .veil{display:flex}
+.shot.veil-on .ph{display:none}
+.shot.is-dim img{filter:grayscale(.3) brightness(.8)}
 .shot.is-dim .stamp{opacity:.45}
 .shot .badge{position:absolute;left:9px;top:9px;font-size:11.5px;padding:3px 9px;border-radius:99px;background:rgba(12,18,30,.62);color:#dfe6f4;backdrop-filter:blur(4px)}
 .shot .stamp{position:absolute;right:9px;bottom:8px;font-size:10.5px;color:rgba(230,236,248,.72);background:rgba(12,18,30,.5);padding:2px 7px;border-radius:99px}
@@ -1644,7 +1647,7 @@ button:disabled{opacity:.5;cursor:default}
 .empty{color:var(--sub);text-align:center;padding:28px 0;font-size:14px;grid-column:1/-1}
 .newcard{border-style:dashed;border-color:#ccd3e6;background:rgba(255,255,255,.55)}
 .newcard:hover{border-color:#9fa9c6;background:#fff;box-shadow:0 6px 18px rgba(20,20,50,.08)}
-.newshot{width:100%;height:auto;flex:0 0 auto;aspect-ratio:var(--shot-ar,16/10);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:0;background:transparent;border-radius:0;color:var(--sub);cursor:pointer}
+.newshot{width:100%;height:auto;flex:0 0 auto;aspect-ratio:16/10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:0;background:transparent;border-radius:0;color:var(--sub);cursor:pointer}
 .newshot .plus{width:62px;height:62px;border-radius:50%;border:2px dashed #b8c1d8;display:flex;align-items:center;justify-content:center;font-size:35px;font-weight:300;line-height:1;color:#8d97b4;padding-bottom:4px;transition:transform .18s,color .18s,border-color .18s}
 .newcard:hover .plus{border-style:solid;border-color:var(--brand);color:var(--brand);transform:scale(1.06)}
 .newlbl{font-size:13px;font-weight:500}
@@ -1915,19 +1918,6 @@ const c={name:name,el:el,shot:el.querySelector('.shot'),img:el.querySelector('im
 ph:el.querySelector('.ph'),pht:el.querySelector('.pht'),veil:el.querySelector('.veil'),
 badge:el.querySelector('.badge'),stamp:el.querySelector('.stamp'),
 acts:el.querySelector('.acts'),adm:el.querySelector('.adm'),nm:el.querySelector('.nm'),user:null};
-/* 帧子（.shot）的宽高比跟着画面走：远程桌面是 1280x800 还是 1680x1050、
-   窗口被拖成什么形状，缩略图就长什么样，不再用 16:10 的框去 cover 裁一刀。*/
-c.img.addEventListener('load',function(){
-const w=c.img.naturalWidth,h=c.img.naturalHeight;
-if(!w||!h)return;
-const ar=w/h;
-if(!(ar>0.4&&ar<4))return;
-if(c.shot.dataset.ar&&Math.abs(parseFloat(c.shot.dataset.ar)-ar)<0.005)return;
-c.shot.dataset.ar=ar;
-c.shot.style.aspectRatio=ar;
-const root=document.documentElement;
-if(!root.dataset.sar){root.dataset.sar='1';root.style.setProperty('--shot-ar',ar)}
-});
 cards[name]=c;
 return c;
 }
@@ -1938,18 +1928,22 @@ c.nm.textContent=u.name;
 c.adm.style.display=u.admin?'':'none';
 const bg=u.online&&u.window==='hidden';
 const noWin=u.window==='none';
+const off=!u.connected;
+const hasPic=!!c.img.dataset.url;
+/* 画面留着：断开/隐藏只在上面压一层灰，绝不把图撤掉——断开前最后那一帧就是这个卡片的样子 */
 let cls='shot';
-if(noWin||!u.connected)cls+=' is-off';
-if(bg)cls+=' is-dim';
+if(bg||noWin||off)cls+=' is-dim';
+if(!hasPic)cls+=' veil-on';
 c.shot.className=cls;
 const st=u.pending?t('pending'):(bg?t('bg'):(u.online?t('online'):(u.connected?t('disconnected'):t('offline'))));
 const stTitle=bg?t('tagBgTitle'):(u.online?t('tagActiveTitle'):(u.connected?t('tagDiscTitle'):(u.pending?t('tagPendTitle'):t('tagOffTitle'))));
 c.badge.textContent=st;
 c.badge.title=stTitle;
 c.badge.style.color=u.pending?'#f0c27b':(u.online?'#8ce8c4':(u.connected?'#f2d19b':'#cfd5e6'));
-c.veil.textContent=u.pending?t('pending'):(bg?t('shotHidden'):(noWin?(u.connected?t('shotOff'):t('shotNone')):''));
-if(noWin){c.img.classList.remove('ready');c.ph.style.display='flex';c.stamp.style.display='none'}
-c.pht.textContent=u.pending?'':(u.online?t('shotWait'):(noWin?(u.connected?t('shotOff'):t('shotNone')):t('shotWait')));
+c.veil.textContent=u.pending?t('pending'):(bg?t('shotHidden'):(noWin?(u.connected?t('shotOff'):t('shotNone')):t('shotWait')));
+if(hasPic){c.ph.style.display='none';c.img.classList.add('ready')}
+else{c.ph.style.display='flex';
+c.pht.textContent=u.pending?'':(noWin?(u.connected?t('shotOff'):t('shotNone')):t('shotWait'))}
 const q='\''+u.name+'\'';
 let inner='';
 if(u.pending){
@@ -1995,22 +1989,23 @@ async function loadThumb(c){
 if(!c||!c.user)return;
 try{
 const r=await fetch('/api/thumb?name='+encodeURIComponent(c.name)+'&t='+Date.now(),{cache:'no-store'});
+const kind=r.headers.get('X-Thumb')||'';
 if(r.status===200){
 const blob=await r.blob();
 const url=URL.createObjectURL(blob);
 const prev=c.img.dataset.url;
 c.img.src=url;
 c.img.dataset.url=url;
+c.img.dataset.stale=(kind==='ok')?'':'1';   // 断开/隐藏时给的是最后一帧，别再反复要
 c.img.classList.add('ready');
 c.ph.style.display='none';
-c.stamp.textContent=new Date().toLocaleTimeString();
+c.shot.classList.remove('veil-on');
+c.stamp.textContent=r.headers.get('X-Thumb-Time')||new Date().toLocaleTimeString();
 c.stamp.style.display='';
 if(prev)URL.revokeObjectURL(prev);
-}else{
+}else if(!c.img.dataset.url){
 c.stamp.style.display='none';
-if(!c.img.dataset.url){
-c.pht.textContent=(r.headers.get('X-Thumb')==='hidden')?t('shotHidden'):t('shotNone');
-}
+c.pht.textContent=(kind==='hidden')?t('shotHidden'):t('shotNone');
 }
 }catch(e){}
 }
@@ -2020,7 +2015,11 @@ async function shotTick(){
 clearTimeout(shotTimer);
 if(document.visibilityState==='visible'){
 const jobs=[];
-for(const n in cards){const c=cards[n];if(c.user&&c.user.online)jobs.push(loadThumb(c))}
+/* 断开的账号也要拉一次：服务端会把断开前最后一帧发过来，卡片上不会空一块 */
+for(const n in cards){const c=cards[n];
+if(!c.user||c.user.pending)continue;
+if(c.img.dataset.stale&&!c.user.online)continue;
+jobs.push(loadThumb(c))}
 await Promise.all(jobs);
 }
 shotTimer=setTimeout(shotTick,SHOT_MS);
@@ -2177,20 +2176,23 @@ class Handler(BaseHTTPRequestHandler):
     def _thumb(self):
         """一张缩略图。status 200=有画面，204=没画面（X-Thumb 说明原因）。
 
-        只截「窗口当前真的可见」的会话：窗口藏起来时 Windows 不再给它渲染，
-        硬抓只会得到黑屏，所以直接回 204，前端保持上一帧并打上「已隐藏」。
+        X-Thumb 取值：ok 刚抓的一帧 / hidden 窗口被藏起来或最小化 /
+        stale 会话断了，给的是断开前最后一帧 / none 从来没有过画面。
+        断开也照样给图，卡片上就不会突然空一块。
         """
         q = urllib.parse.urlparse(self.path).query
         name = (urllib.parse.parse_qs(q).get('name') or [''])[0]
-        data, state = None, 'none'
+        data, state, ts = None, 'none', 0.0
         if name:
             try:
                 hwnd = _owned_hwnd(name)
-                data, state = thumb.render(name, hwnd)
+                data, state, ts = thumb.render(name, hwnd)
             except Exception as e:
                 _log('缩略图失败 %s: %s' % (name, e))
         self.send_response(200 if data else 204)
         self.send_header('X-Thumb', state)
+        if ts:
+            self.send_header('X-Thumb-Time', time.strftime('%H:%M:%S', time.localtime(ts)))
         self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate')
         if data:
             self.send_header('Content-Type', 'image/jpeg')

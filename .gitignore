@@ -230,6 +230,7 @@ clients.json
 aliases.json
 client.log
 rdp_repair_backup.json
+thumbs/
 termwrap_backup.json
 *.bmp
 
